@@ -1,8 +1,8 @@
 # claude-accounts-dash
 
 [![CI](https://github.com/erenkarakoc/claude-accounts-dash/actions/workflows/ci.yml/badge.svg)](https://github.com/erenkarakoc/claude-accounts-dash/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/claude-accounts-dash)](https://pypi.org/project/claude-accounts-dash/)
-[![Python](https://img.shields.io/pypi/pyversions/claude-accounts-dash)](https://pypi.org/project/claude-accounts-dash/)
+[![PyPI](https://img.shields.io/pypi/v/claude-accounts-dash?cacheSeconds=3600)](https://pypi.org/project/claude-accounts-dash/)
+[![Python](https://img.shields.io/pypi/pyversions/claude-accounts-dash?cacheSeconds=3600)](https://pypi.org/project/claude-accounts-dash/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **A local dashboard for people who use more than one Claude account.**
