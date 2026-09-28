@@ -86,6 +86,7 @@ every 30 seconds, and only re-reads files that changed. Stop it with `Ctrl+C`.
   and a chart of the last 24 hours.
 - A **"Use now"** badge on the account with the most room left, and a warning when an
   account is currently blocked by a limit, showing the reset time Claude reported.
+- How many sessions are open on each account, and its desktop **scheduled tasks**.
 - Click an account's name to give it a **nickname** (for example "Pro #2 – work").
   Accounts show a short ID until you do.
 
@@ -94,12 +95,19 @@ every 30 seconds, and only re-reads files that changed. Stop it with `Ctrl+C`.
   See [below](#continuing-a-session-on-another-account).
 
 **Sessions**
-- All sessions from all accounts. Search by title, folder or ID, and filter by account.
-- Background sessions created by plugins are hidden unless you turn on **Background**.
+- All sessions from all accounts: desktop app, CLI, SDK and IDE. Search by title, folder or ID,
+  and filter by account or **source**.
+- Sessions that are **open right now** are listed first, marked *Open*, or *Working* while
+  Claude is busy.
+- Tags show the source, background jobs, git worktrees, archived sessions and sessions that have
+  a **plan**.
+- Sessions you deleted in the desktop app, and background sessions created by plugins, are hidden
+  unless you turn on **Hidden**.
 
 **Projects**
 - Every project folder with its sessions, prompts, tokens, disk size and the accounts that
-  worked on it. **Open** shows the folder in Explorer, Finder or your file manager.
+  worked on it. Sessions in git worktrees are grouped under their main project.
+  **Open** shows the folder in Explorer, Finder or your file manager.
 
 **Activity**
 - Output, input and cache token totals, tokens per day split by model, prompts by hour of
@@ -138,8 +146,9 @@ opens the export for the newest session that hit a limit.
    | **Full chat** + **Compact** (default) | Every turn. Very long pasted prompts are trimmed, Claude's final reply for each turn is kept, and tool calls are summarized as "edited `a.ts`, `b.ts`; used 12x Bash". | Small to medium |
    | **Last 5 / 10 / 25** | Only the most recent turns, plus the summary Claude wrote when the chat was compacted, so the older part isn't lost. | Small |
    | **Compact** off | Everything, including every tool call. | Can be very large |
-   | **Brief** | A short note: project folder, git branch, files touched, your last 5 requests, Claude's earlier summary, its last reply, and the path to the full transcript. | About 1k tokens |
+   | **Brief** | A short note: project folder, git branch, files touched, the plan, your last 5 requests, Claude's earlier summary, its last reply, and the path to the full transcript. | About 1k tokens |
 
+   If the session has a plan (from plan mode or a file in `~/.claude/plans`), it is included too.
    The size (characters and approximate tokens) is shown under the preview.
 3. Click **Copy to clipboard**, or **Download .md**.
 4. In the Claude desktop app, switch to the other account and start a new session **in the
@@ -168,7 +177,13 @@ the account recorded in the transcript where possible.
 |---|---|
 | Limit % per account | `<app data>/plan-usage-history.json` |
 | Which account owns each desktop session | `<app data>/claude-code-sessions/<account>/<org>/local_*.json` |
-| Transcripts: messages, tokens, limit hits, compaction summaries | `~/.claude/projects/**/*.jsonl` |
+| Sessions deleted or archived in the desktop app | `<app data>/claude-code-sessions/**/deleted_*`, `archived-sessions.idx` |
+| Desktop scheduled tasks | `<app data>/claude-code-sessions/**/scheduled-tasks.json` |
+| Git worktrees created by the desktop app | `<app data>/git-worktrees.json` |
+| Transcripts: messages, tokens, limit hits, compaction summaries, source (desktop, CLI, SDK, IDE) | `~/.claude/projects/**/*.jsonl` |
+| Sessions open right now (CLI and desktop) | `~/.claude/sessions/*.json` (checked against running processes) |
+| Background jobs | `~/.claude/jobs/*/state.json` |
+| Plans | `~/.claude/plans/*.md` |
 | Signed-in CLI account (email shown on its card) | `~/.claude.json` |
 | Your nicknames (written by claude-accounts-dash) | `<config>/nicknames.json` |
 

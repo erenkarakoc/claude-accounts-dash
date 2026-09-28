@@ -167,6 +167,9 @@ def build_desktop_sessions():
     out = {}
     if not DESKTOP_SESSIONS.is_dir():
         return out
+    archived = set()
+    for f in DESKTOP_SESSIONS.glob("**/archived-sessions.idx"):
+        archived.update((read_json(f, {}) or {}).get("archived") or [])
     for f in DESKTOP_SESSIONS.glob("*/*/local_*.json"):
         d = read_json(f)
         if not d or not d.get("cliSessionId"):
@@ -175,10 +178,131 @@ def build_desktop_sessions():
             "account": f.parent.parent.name, "org": f.parent.name,
             "title": d.get("title"), "cwd": d.get("cwd"),
             "created": d.get("createdAt"), "last_activity": d.get("lastActivityAt"),
-            "model": d.get("model"), "archived": bool(d.get("isArchived")),
+            "model": d.get("model"), "archived": bool(d.get("isArchived")) or d.get("sessionId") in archived,
             "turns": d.get("completedTurns"),
         }
     return out
+
+
+def build_desktop_deleted():
+    """Sessions deleted in the desktop app: cliSessionId -> {org, account, at}.
+
+    The app leaves a `deleted_<cliSessionId>` marker (containing the deletion time)
+    while the transcript itself may stay in ~/.claude/projects.
+    """
+    out = {}
+    if DESKTOP_SESSIONS.is_dir():
+        for f in DESKTOP_SESSIONS.glob("*/*/deleted_*"):
+            sid = f.name[len("deleted_"):]
+            try:
+                at = int(f.read_text(encoding="utf-8").strip() or 0)
+            except (OSError, ValueError):
+                at = 0
+            out[sid] = {"org": f.parent.name, "account": f.parent.parent.name, "at": at}
+    return out
+
+
+def build_scheduled_tasks():
+    """Scheduled tasks per org from the desktop app (Code and Cowork)."""
+    out = defaultdict(list)
+    for base in (DESKTOP_SESSIONS, DESKTOP_DIR / "local-agent-mode-sessions"):
+        if not base.is_dir():
+            continue
+        for f in base.glob("*/*/scheduled-tasks.json"):
+            for t in (read_json(f, {}) or {}).get("scheduledTasks") or []:
+                if isinstance(t, dict):
+                    name = t.get("name") or t.get("title") or (t.get("prompt") or "")[:60] or "Scheduled task"
+                    out[f.parent.name].append(str(name))
+    return out
+
+
+def pid_alive(pid):
+    """True if a process with this pid is running on this machine."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel32.CloseHandle(handle)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def build_live_sessions(now_ms):
+    """Sessions that are open right now (CLI and desktop), from ~/.claude/sessions/*.json."""
+    out = {}
+    folder = CLAUDE_HOME / "sessions"
+    if not folder.is_dir():
+        return out
+    for f in folder.glob("*.json"):
+        d = read_json(f)
+        if not isinstance(d, dict) or not d.get("sessionId"):
+            continue
+        updated = d.get("updatedAt") or d.get("statusUpdatedAt") or d.get("startedAt") or 0
+        alive = pid_alive(d.get("pid")) if d.get("pid") else now_ms - updated < 10 * 60_000
+        if not alive:
+            continue
+        out[d["sessionId"]] = {"status": d.get("status") or "open", "entry": d.get("entrypoint"),
+                               "name": d.get("name"), "updated": updated}
+    return out
+
+
+def build_jobs():
+    """Background jobs started from Claude Code: sessionId -> {name, state}."""
+    out = {}
+    folder = CLAUDE_HOME / "jobs"
+    if not folder.is_dir():
+        return out
+    for f in folder.glob("*/state.json"):
+        d = read_json(f)
+        if not isinstance(d, dict):
+            continue
+        info = {"name": d.get("name") or f.parent.name, "state": d.get("state") or "unknown"}
+        for key in ("sessionId", "resumeSessionId"):
+            if d.get(key):
+                out[d[key]] = info
+    return out
+
+
+WORKTREE_RE = re.compile(r"^(.*?)[/\\]\.claude(?:[/\\]|-)worktrees[/\\]([^/\\]+)")
+
+
+def build_worktrees():
+    """Worktree folder -> base repo, from the desktop app's git-worktrees.json."""
+    out = {}
+    d = read_json(DESKTOP_DIR / "git-worktrees.json", {}) or {}
+    for name, w in (d.get("worktrees") or {}).items():
+        if isinstance(w, dict) and w.get("path") and w.get("baseRepo"):
+            out[os.path.normcase(os.path.normpath(w["path"]))] = (w["baseRepo"], w.get("name") or name)
+    return out
+
+
+def project_of(cwd, worktrees):
+    """(project folder, worktree name or None) for a session's working directory."""
+    if not cwd:
+        return None, None
+    hit = worktrees.get(os.path.normcase(os.path.normpath(cwd)))
+    if hit:
+        return hit
+    m = WORKTREE_RE.match(cwd)
+    if m:
+        return m.group(1), m.group(2)
+    return cwd, None
 
 
 # ---------------------------------------------------------------- transcripts (incremental)
@@ -186,7 +310,8 @@ def build_desktop_sessions():
 class FileState:
     __slots__ = ("offset", "sid", "title", "cwd", "branch", "first", "last", "prompts",
                  "asst", "tok", "models", "daily", "hours", "owner_org", "msg_ids",
-                 "last_prompts", "last_text", "files", "cost", "is_sub", "entry", "limit_hit", "summary")
+                 "last_prompts", "last_text", "files", "cost", "is_sub", "entry", "limit_hit", "summary",
+                 "plan_path", "plan_text")
 
     def __init__(self, is_sub):
         self.offset = 0
@@ -206,6 +331,8 @@ class FileState:
         self.entry = None
         self.limit_hit = None       # (ms, text, kind)
         self.summary = None
+        self.plan_path = None       # plan file Claude wrote (~/.claude/plans/*.md)
+        self.plan_text = None       # plan submitted with ExitPlanMode
 
 
 class TranscriptIndex:
@@ -310,6 +437,14 @@ class TranscriptIndex:
                 if ms and (not st.limit_hit or ms >= st.limit_hit[0]):
                     st.limit_hit = (ms, txt.strip()[:160], kind)
                 return
+            for b in msg.get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    inp = b.get("input") or {}
+                    fp = str(inp.get("file_path") or "")
+                    if is_plan_path(fp):
+                        st.plan_path = fp
+                    if b.get("name") == "ExitPlanMode" and isinstance(inp.get("plan"), str):
+                        st.plan_text = inp["plan"][:20000]
             mid = msg.get("id")
             texts = [b.get("text", "") for b in (msg.get("content") or [])
                      if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
@@ -344,6 +479,23 @@ def is_temp_path(fp):
     return any(x in f for x in ("/scratchpad/", "/appdata/local/temp/", "/tmp/", "/var/folders/"))
 
 
+def is_plan_path(fp):
+    """Plan files live in ~/.claude/plans (or $CLAUDE_CONFIG_DIR/plans)."""
+    f = fp.replace(chr(92), "/").lower()
+    plans_dir = str(CLAUDE_HOME / "plans").replace(chr(92), "/").lower() + "/"
+    return f.endswith(".md") and ("/.claude/plans/" in f or f.startswith(plans_dir))
+
+
+def session_plan(st):
+    """(path or None, text or None) of the latest plan in a session."""
+    if st.plan_path:
+        try:
+            return st.plan_path, Path(st.plan_path).read_text(encoding="utf-8")
+        except OSError:
+            pass
+    return st.plan_path, st.plan_text
+
+
 def is_background(path):
     """Sessions produced by plugins/background workers (e.g. claude-mem observers)."""
     return bool(path) and ("observer-sessions" in path or "claude-mem" in path)
@@ -358,6 +510,11 @@ def build_data():
     INDEX.refresh()
     limits = build_limits(now)
     desk = build_desktop_sessions()
+    deleted = build_desktop_deleted()
+    live = build_live_sessions(now)
+    jobs = build_jobs()
+    scheduled = build_scheduled_tasks()
+    worktrees = build_worktrees()
     nicks = read_json(NICK_FILE, {}) or {}
     cli = (read_json(CLI_CONFIG, {}) or {}).get("oauthAccount") or {}
 
@@ -376,7 +533,7 @@ def build_data():
             "id": sid, "title": None, "cwd": None, "branch": None, "first": None, "last": None,
             "prompts": 0, "msgs": 0, "tok": Counter(), "models": Counter(), "size": 0,
             "path": None, "owner_org": None, "files": [], "subagents": 0, "cost": None,
-            "entry": None, "limit_hit": None,
+            "entry": None, "limit_hit": None, "plan": False,
         })
         try:
             s["size"] += os.path.getsize(path)
@@ -397,6 +554,7 @@ def build_data():
             s["files"] = st.files[-15:]
             s["cost"] = st.cost
             s["entry"] = st.entry
+            s["plan"] = bool(st.plan_path or st.plan_text)
         if st.limit_hit and (not s["limit_hit"] or st.limit_hit[0] > s["limit_hit"][0]):
             s["limit_hit"] = st.limit_hit
         for k in ("first", "last"):
@@ -415,20 +573,28 @@ def build_data():
 
     orgs = set(limits)
     rows = []
+    def extras(sid, cwd, background):
+        gone = sid in deleted and sid not in desk
+        project, worktree = project_of(cwd, worktrees)
+        return {"deleted": gone, "live": live.get(sid), "job": jobs.get(sid), "project": project,
+                "worktree": worktree, "background": background, "hidden": background or gone}
+
     for sid, s in sessions.items():
         dm = desk.get(sid) or {}
-        org = dm.get("org") or s["owner_org"]
+        org = dm.get("org") or (deleted.get(sid) or {}).get("org") or s["owner_org"]
         if org:
             orgs.add(org)
-        title = dm.get("title") or s["title"] or "(untitled)"
+        title = dm.get("title") or s["title"] or (live.get(sid) or {}).get("name") or "(untitled)"
+        cwd = dm.get("cwd") or s["cwd"]
         rows.append({
-            "id": sid, "title": title, "cwd": dm.get("cwd") or s["cwd"], "branch": s["branch"],
+            "id": sid, "title": title, "cwd": cwd, "branch": s["branch"],
             "org": org, "account": dm.get("account"), "desktop": bool(dm), "archived": dm.get("archived", False),
             "first": s["first"], "last": max(filter(None, [s["last"], dm.get("last_activity")]), default=None),
             "prompts": s["prompts"], "msgs": s["msgs"], "size": s["size"], "subagents": s["subagents"],
             "tokens": dict(s["tok"]), "model": dm.get("model") or (s["models"].most_common(1)[0][0] if s["models"] else None),
-            "cost": s["cost"], "path": s["path"], "entry": s["entry"],
-            "limit_hit": s["limit_hit"], "background": is_background(s["path"]),
+            "cost": s["cost"], "path": s["path"], "entry": s["entry"] or (live.get(sid) or {}).get("entry"),
+            "limit_hit": s["limit_hit"], "plan": s["plan"],
+            **extras(sid, cwd, is_background(s["path"])),
         })
     # desktop sessions that have no transcript yet
     for sid, dm in desk.items():
@@ -437,19 +603,20 @@ def build_data():
                          "org": dm["org"], "account": dm["account"], "desktop": True, "archived": dm["archived"],
                          "first": dm.get("created"), "last": dm.get("last_activity"), "prompts": 0, "msgs": 0,
                          "size": 0, "subagents": 0, "tokens": {}, "model": dm.get("model"), "cost": None,
-                         "path": None, "entry": "claude-desktop", "limit_hit": None, "background": False})
+                         "path": None, "entry": "claude-desktop", "limit_hit": None, "plan": False,
+                         **extras(sid, dm.get("cwd"), False)})
             orgs.add(dm["org"])
     rows.sort(key=lambda r: r["last"] or 0, reverse=True)
 
     # accounts
     accounts = []
     for org in orgs:
-        mine = [r for r in rows if r["org"] == org]
+        mine = [r for r in rows if r["org"] == org and not r["deleted"]]
         tok = Counter()
         for r in mine:
             tok.update(r["tokens"])
         lim = limits.get(org)
-        hits = [r["limit_hit"] for r in mine if r["limit_hit"] and not r["background"]]
+        hits = [r["limit_hit"] for r in mine if r["limit_hit"] and not r["hidden"]]
         accounts.append({
             "org": org, "short": short(org), "nick": nicks.get(org) or "",
             "email": cli.get("emailAddress") if cli.get("organizationUuid") == org else None,
@@ -458,6 +625,8 @@ def build_data():
             "last_active": max((r["last"] or 0 for r in mine), default=0) or None,
             "tokens": dict(tok),
             "last_limit_hit": max(hits) if hits else None,
+            "open": sum(1 for r in mine if r["live"]),
+            "scheduled": scheduled.get(org, []),
         })
     # best account to use now: lowest current 5h, then lowest weekly
     def score(a):
@@ -468,9 +637,12 @@ def build_data():
     best = min(candidates, key=score)["org"] if candidates else None
 
     # projects
-    projects = defaultdict(lambda: {"sessions": 0, "size": 0, "last": 0, "orgs": set(), "tokens": 0, "prompts": 0})
+    projects = defaultdict(lambda: {"sessions": 0, "size": 0, "last": 0, "orgs": set(), "tokens": 0, "prompts": 0,
+                                    "worktrees": set(), "open": 0})
     for r in rows:
-        key = r["cwd"] or "(unknown)"
+        if r["deleted"]:
+            continue
+        key = r["project"] or "(unknown)"
         p = projects[key]
         p["sessions"] += 1
         p["size"] += r["size"]
@@ -479,7 +651,11 @@ def build_data():
         p["tokens"] += sum(v for k, v in r["tokens"].items() if k != "cache_read")
         if r["org"]:
             p["orgs"].add(r["org"])
-    proj_rows = [{"cwd": k, **{**v, "orgs": sorted(v["orgs"])},
+        if r["worktree"]:
+            p["worktrees"].add(r["worktree"])
+        if r["live"]:
+            p["open"] += 1
+    proj_rows = [{"cwd": k, **{**v, "orgs": sorted(v["orgs"]), "worktrees": sorted(v["worktrees"])},
                   "exists": os.path.isdir(k) if k != "(unknown)" else False} for k, v in projects.items()]
     proj_rows.sort(key=lambda p: p["last"], reverse=True)
 
@@ -498,12 +674,15 @@ def build_data():
         totals.update(r["tokens"])
 
     return {
-        "now": now, "best": best, "accounts": accounts, "sessions": rows[:400],
+        "now": now, "best": best, "accounts": accounts, "sessions": rows[:400] + [r for r in rows[400:] if r["live"]],
         "projects": proj_rows, "activity": activity, "totals": dict(totals),
         "counts": {"sessions": len(rows), "projects": len(proj_rows),
-                   "size": sum(r["size"] for r in rows)},
+                   "size": sum(r["size"] for r in rows),
+                   "visible": sum(1 for r in rows if not r["hidden"]),
+                   "hidden": sum(1 for r in rows if r["hidden"]),
+                   "open": sum(1 for r in rows if r["live"])},
         "sources": {"usage": USAGE_FILE.exists(), "desktop": DESKTOP_SESSIONS.exists(),
-                    "projects": PROJECTS_DIR.exists()},
+                    "projects": PROJECTS_DIR.exists(), "live": (CLAUDE_HOME / "sessions").is_dir()},
     }
 
 
@@ -528,6 +707,11 @@ def handoff_brief(sid):
     if main.last_prompts:
         lines += ["", "My last requests were:"]
         lines += [f"{i}. {p.strip()}" for i, p in enumerate(main.last_prompts, 1)]
+    plan_path, plan_text = session_plan(main)
+    if plan_path:
+        lines.append(f"- Plan file: {plan_path}")
+    if plan_text:
+        lines += ["", "The plan we agreed on (trimmed):", _trim(plan_text.strip(), 3000)]
     if main.summary:
         body = main.summary.split("Summary:", 1)[-1].strip()
         lines += ["", "Context summary Claude wrote earlier in that session (trimmed):", _trim(body, 2500)]
@@ -581,10 +765,11 @@ def export_chat(sid, turns=0, tools=True, compact=True):
     summarizes tool calls instead of listing every one.
     """
     with INDEX.lock:
-        path = next((p for p, st in INDEX.files.items() if st.sid == sid and not st.is_sub), None)
+        path, main = next(((p, st) for p, st in INDEX.files.items() if st.sid == sid and not st.is_sub), (None, None))
     if not path:
         return None
     desk = build_desktop_sessions().get(sid) or {}
+    plan_path, plan_text = session_plan(main)
     turns_out, cur, meta, seen_text = [], None, {}, set()
     with open(path, "rb") as f:
         for raw in f:
@@ -655,8 +840,12 @@ def export_chat(sid, turns=0, tools=True, compact=True):
     ]
     if meta.get("branch"):
         out.append(f"- Git branch: `{meta['branch']}`")
+    if plan_path:
+        out.append(f"- Plan file: `{plan_path}`")
     out.append(f"- Turns included: {included} of {total}" + (" (compact)" if compact else ""))
     out += ["", "---", ""]
+    if plan_text:
+        out += ["## Plan", "", _trim(plan_text.strip(), 6000) if compact else plan_text.strip(), "", "---", ""]
     for tr in turns_out:
         if "summary" in tr:
             out += ["## Earlier context (summary Claude wrote when the chat was compacted)", "",

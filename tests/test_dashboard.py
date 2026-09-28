@@ -15,6 +15,8 @@ ORG_A = "11111111-1111-4111-8111-111111111111"
 ORG_B = "22222222-2222-4222-8222-222222222222"
 ACCOUNT = "33333333-3333-4333-8333-333333333333"
 SID = "44444444-4444-4444-8444-444444444444"
+SID_CLI = "55555555-5555-4555-8555-555555555555"   # CLI session in a worktree, open right now, a background job
+SID_DEL = "66666666-6666-4666-8666-666666666666"   # deleted in the desktop app
 
 
 def iso(ms):
@@ -52,7 +54,8 @@ def make_fixture(root: Path):
         {**base, "type": "assistant", "timestamp": iso(now - 2_990_000),
          "message": {"id": "m1", "model": "claude-test", "content": [
              {"type": "text", "text": "Starting."},
-             {"type": "tool_use", "name": "Edit", "input": {"file_path": str(proj_dir / "app.py")}}],
+             {"type": "tool_use", "name": "Edit", "input": {"file_path": str(proj_dir / "app.py")}},
+             {"type": "tool_use", "name": "Write", "input": {"file_path": str(claude / "plans" / "brave-plan.md")}}],
              "usage": {"input_tokens": 10, "output_tokens": 20, "cache_read_input_tokens": 5, "cache_creation_input_tokens": 7}}},
         {**base, "type": "file-history-delta", "trackingPath": "app.py"},
         {**base, "type": "user", "isCompactSummary": True, "turnOrigin": "human", "timestamp": iso(now - 2_000_000),
@@ -68,6 +71,34 @@ def make_fixture(root: Path):
     with open(tdir / f"{SID}.jsonl", "w", encoding="utf-8") as f:
         for line in lines:
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    (claude / "plans").mkdir(parents=True)
+    (claude / "plans" / "brave-plan.md").write_text("# Plan\n1. Build the API\n2. Ship it", encoding="utf-8")
+
+    # a CLI session inside a git worktree, open right now and registered as a background job
+    wt = proj_dir / ".claude" / "worktrees" / "feat-x"
+    wt.mkdir(parents=True)
+    cli = {"sessionId": SID_CLI, "cwd": str(wt), "entrypoint": "cli"}
+    with open(tdir / f"{SID_CLI}.jsonl", "w", encoding="utf-8") as f:
+        f.write(json.dumps({**cli, "type": "user", "turnOrigin": "human", "timestamp": iso(now - 60_000),
+                            "message": {"role": "user", "content": "Fix the flaky test"}}) + "\n")
+    (claude / "sessions").mkdir(parents=True)
+    (claude / "sessions" / "123.json").write_text(json.dumps({
+        "pid": os.getpid(), "sessionId": SID_CLI, "cwd": str(wt), "status": "busy", "entrypoint": "cli",
+        "updatedAt": now}), encoding="utf-8")
+    (claude / "sessions" / "999.json").write_text(json.dumps({     # stale: that process is gone
+        "pid": 2_000_000_000, "sessionId": SID, "status": "idle", "updatedAt": now - 86_400_000}), encoding="utf-8")
+    (claude / "jobs" / "j1").mkdir(parents=True)
+    (claude / "jobs" / "j1" / "state.json").write_text(
+        json.dumps({"state": "working", "name": "fix-flaky", "sessionId": SID_CLI}), encoding="utf-8")
+
+    # a session deleted in the desktop app: the transcript stays on disk, a marker is left behind
+    with open(tdir / f"{SID_DEL}.jsonl", "w", encoding="utf-8") as f:
+        f.write(json.dumps({"sessionId": SID_DEL, "cwd": str(proj_dir), "entrypoint": "claude-desktop", "type": "user",
+                            "turnOrigin": "human", "timestamp": iso(now - 500_000),
+                            "message": {"role": "user", "content": "Old experiment"}}) + "\n")
+    (sess_dir / f"deleted_{SID_DEL}").write_text(str(now - 100_000), encoding="utf-8")
+    (sess_dir / "scheduled-tasks.json").write_text(
+        json.dumps({"scheduledTasks": [{"name": "Nightly tests"}]}), encoding="utf-8")
     return app, claude, cfg, proj_dir
 
 
@@ -98,6 +129,31 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(d["best"], ORG_B)
         self.assertEqual(orgs[ORG_A]["sessions"], 1)
         self.assertIsNotNone(orgs[ORG_A]["last_limit_hit"])
+
+    def test_desktop_and_cli_sources(self):
+        d = self.S.build_data()
+        rows = {r["id"]: r for r in d["sessions"]}
+        cli, gone, main = rows[SID_CLI], rows[SID_DEL], rows[SID]
+        self.assertEqual(cli["entry"], "cli")
+        self.assertEqual(cli["live"]["status"], "busy")          # its process is alive
+        self.assertIsNone(main["live"])                          # stale session file is ignored
+        self.assertEqual(cli["job"], {"name": "fix-flaky", "state": "working"})
+        self.assertEqual(cli["worktree"], "feat-x")
+        self.assertEqual(Path(cli["project"]), self.proj)        # grouped under the main project
+        self.assertTrue(gone["deleted"] and gone["hidden"])
+        self.assertEqual(gone["org"], ORG_A)                     # attributed from the marker's folder
+        self.assertTrue(main["plan"])
+        self.assertEqual(d["counts"]["open"], 1)
+        a = next(x for x in d["accounts"] if x["org"] == ORG_A)
+        self.assertEqual(a["scheduled"], ["Nightly tests"])
+        self.assertEqual(a["sessions"], 1)                       # the deleted session is not counted
+        proj = next(x for x in d["projects"] if Path(x["cwd"]) == self.proj)
+        self.assertEqual(proj["worktrees"], ["feat-x"])
+
+    def test_plan_in_brief_and_export(self):
+        self.S.build_data()
+        self.assertIn("Build the API", self.S.handoff_brief(SID))
+        self.assertIn("## Plan", self.S.export_chat(SID, 0, True, True)["text"])
 
     def test_session_tokens_and_limit_hit(self):
         s = next(r for r in self.S.build_data()["sessions"] if r["id"] == SID)

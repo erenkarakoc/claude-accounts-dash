@@ -55,6 +55,11 @@ header{display:flex;align-items:center;gap:12px;padding:20px 0;border-bottom:1px
 .badge.bad{background:var(--bad-bg);color:var(--bad);border-color:transparent}
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .chip b{width:8px;height:8px;border-radius:50%;display:inline-block}
+.tag{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;border-radius:999px;border:1px solid var(--border);font-size:11px;color:var(--muted);white-space:nowrap}
+.tag.live{color:var(--good);background:var(--good-bg);border-color:transparent}
+.tag.live i{width:6px;height:6px;border-radius:50%;background:var(--good);display:inline-block}
+.tag.busy i{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
 
 /* hero */
 .hero{padding:40px 0 28px}
@@ -198,7 +203,8 @@ textarea{width:100%;min-height:320px;resize:vertical;border:1px solid var(--bord
       <div class="toolbar">
         <input class="input" id="q" placeholder="Search title, project or id…">
         <select class="input" id="f-acct"></select>
-        <label class="switch"><input type="checkbox" id="f-bg"> Background</label>
+        <select class="input" id="f-src"></select>
+        <label class="switch" title="Sessions deleted in the desktop app, and background sessions created by plugins"><input type="checkbox" id="f-bg"> Hidden</label>
       </div>
       <div class="card list" id="sessions"></div>
     </section>
@@ -341,7 +347,7 @@ function renderAccounts() {
       ${meter("Weekly", sd, l?.sd_reset, l && sd !== l.sd)}
       ${spark(l?.history)}
       ${hit}
-      <div class="acct-foot"><span>${a.sessions} sessions</span><span>${l ? "seen " + ago(l.last_seen) : "no usage data"}</span></div>
+      <div class="acct-foot"><span>${a.sessions} sessions${a.open ? ` · <span style="color:var(--good)">${a.open} open</span>` : ""}${a.scheduled.length ? ` · <span title="${esc(a.scheduled.join("\n"))}">${a.scheduled.length} scheduled</span>` : ""}</span><span>${l ? "seen " + ago(l.last_seen) : "no usage data"}</span></div>
     </div>`;
   }).join("") || `<div class="card empty">No accounts found in local files.</div>`;
 
@@ -358,9 +364,8 @@ function renderAccounts() {
 }
 
 function renderStats() {
-  const t = D.totals, hits = D.sessions.filter(s => s.limit_hit && !s.background).length;
-  const fg = D.sessions.filter(s => !s.background).length;
-  const tiles = [["Sessions", fg], ["Projects", D.counts.projects], ["Transcripts on disk", fmtB(D.counts.size)], ["Limit hits recorded", hits]];
+  const t = D.totals, hits = D.sessions.filter(s => s.limit_hit && !s.hidden).length;
+  const tiles = [["Sessions", D.counts.visible], ["Open now", D.counts.open], ["Projects", D.counts.projects], ["Limit hits recorded", hits]];
   $("#stats").innerHTML = tiles.map(([k, v]) => `<div class="card pad stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   const tt = [["Output tokens", fmtN(t.output||0)], ["Input tokens", fmtN(t.input||0)], ["Cache writes", fmtN(t.cache_write||0)], ["Cache reads", fmtN(t.cache_read||0)]];
   $("#tok-stats").innerHTML = tt.map(([k, v]) => `<div class="card pad stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
@@ -372,13 +377,28 @@ const I = {
   folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>',
 };
 
+const SOURCES = {"claude-desktop": "Desktop", "cli": "CLI", "sdk-cli": "SDK", "sdk-ts": "SDK", "sdk-py": "SDK",
+  "claude-vscode": "VS Code", "vscode": "VS Code", "jetbrains": "JetBrains", "claude-jetbrains": "JetBrains"};
+const source = s => s.entry ? (SOURCES[s.entry] || s.entry) : "Unknown";
+function statusTags(s) {
+  let t = "";
+  if (s.live) t += `<span class="tag live ${s.live.status === "busy" ? "busy" : ""}" title="Open right now"><i></i>${s.live.status === "busy" ? "Working" : "Open"}</span>`;
+  if (s.job) t += `<span class="tag" title="Background job">Job · ${esc(s.job.state)}</span>`;
+  t += `<span class="tag">${esc(source(s))}</span>`;
+  if (s.worktree) t += `<span class="tag" title="Git worktree">⎇ ${esc(s.worktree)}</span>`;
+  if (s.plan) t += `<span class="tag" title="Has a plan; it's included when you export">Plan</span>`;
+  if (s.archived) t += `<span class="tag">Archived</span>`;
+  if (s.deleted) t += `<span class="tag" title="Deleted in the desktop app; the transcript is still on disk">Deleted</span>`;
+  return t;
+}
 function sessionRow(s, withHit) {
   const hit = withHit && s.limit_hit ? `<span style="color:var(--warn)">${esc(s.limit_hit[1].replace(/^You've hit your /, "").replace(/\s*\([^)]*\)\s*$/, ""))}</span>` : "";
   return `<div class="row">
     <div style="min-width:0">
       <div class="t" title="${esc(s.title)}">${esc(s.title)}</div>
-      <div class="m">${chip(s.org)}<span>${esc(base(s.cwd))}</span><span>${withHit && s.limit_hit ? "hit " + when(s.limit_hit[0]) : when(s.last)}</span>
-        ${s.prompts ? `<span>${s.prompts} prompts</span>` : ""}<span>${fmtB(s.size)}</span>${hit}${s.archived ? "<span>archived</span>" : ""}</div>
+      <div class="m">${chip(s.org)}<span>${esc(base(s.project || s.cwd))}</span><span>${withHit && s.limit_hit ? "hit " + when(s.limit_hit[0]) : when(s.last)}</span>
+        ${s.prompts ? `<span>${s.prompts} prompts</span>` : ""}<span>${fmtB(s.size)}</span>${hit}</div>
+      <div class="m" style="gap:5px">${statusTags(s)}</div>
     </div>
     <div class="acts">
       ${s.path ? `<button class="btn sm ${withHit ? "primary" : ""}" data-export="${s.id}">${I.export}Export chat</button>` : ""}
@@ -387,7 +407,7 @@ function sessionRow(s, withHit) {
 }
 
 function renderHandoff() {
-  const hits = D.sessions.filter(s => s.limit_hit && !s.background).sort((a, b) => b.limit_hit[0] - a.limit_hit[0]);
+  const hits = D.sessions.filter(s => s.limit_hit && !s.hidden).sort((a, b) => b.limit_hit[0] - a.limit_hit[0]);
   $("#n-handoff").textContent = hits.length || "";
   const recent = hits.slice(0, 30);
   $("#handoff").innerHTML = recent.length ? recent.map(s => sessionRow(s, true)).join("")
@@ -395,10 +415,11 @@ function renderHandoff() {
 }
 
 function renderSessions() {
-  const q = $("#q").value.trim().toLowerCase(), fa = $("#f-acct").value, bg = $("#f-bg").checked;
-  const list = D.sessions.filter(s => (bg || !s.background) && (!fa || s.org === fa) &&
-    (!q || [s.title, s.cwd, s.id].some(v => (v || "").toLowerCase().includes(q))));
-  $("#n-sessions").textContent = D.sessions.filter(s => !s.background).length;
+  const q = $("#q").value.trim().toLowerCase(), fa = $("#f-acct").value, fs = $("#f-src").value, bg = $("#f-bg").checked;
+  const list = D.sessions.filter(s => (bg || !s.hidden) && (!fa || s.org === fa) && (!fs || source(s) === fs) &&
+    (!q || [s.title, s.cwd, s.id, s.worktree].some(v => (v || "").toLowerCase().includes(q))))
+    .sort((a, b) => (!!b.live - !!a.live) || ((b.last || 0) - (a.last || 0)));   // open sessions first
+  $("#n-sessions").textContent = D.counts.visible;
   $("#sessions").innerHTML = (list.slice(0, showN).map(s => sessionRow(s, false)).join("") ||
     `<div class="empty">No sessions match.</div>`) +
     (list.length > showN ? `<div class="more"><button class="btn sm" id="more">Show more (${list.length - showN})</button></div>` : "");
@@ -409,6 +430,9 @@ function renderAcctFilter() {
   const sel = $("#f-acct"), cur = sel.value;
   sel.innerHTML = `<option value="">All accounts</option>` + D.accounts.map(a => `<option value="${a.org}">${esc(a.nick || a.short)}</option>`).join("");
   sel.value = cur;
+  const src = $("#f-src"), cs = src.value, names = [...new Set(D.sessions.map(source))].sort();
+  src.innerHTML = `<option value="">All sources</option>` + names.map(n => `<option>${esc(n)}</option>`).join("");
+  src.value = names.includes(cs) ? cs : "";
 }
 
 function renderProjects() {
@@ -416,7 +440,8 @@ function renderProjects() {
   $("#projects").innerHTML = D.projects.map(p => `<div class="row">
     <div style="min-width:0"><div class="t">${esc(base(p.cwd))}</div>
       <div class="m"><span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px">${esc(p.cwd)}</span></div>
-      <div class="m">${p.orgs.map(chip).join("")}<span>${p.sessions} sessions</span><span>${p.prompts} prompts</span><span>${fmtN(p.tokens)} tokens</span><span>${fmtB(p.size)}</span><span>last ${when(p.last)}</span></div></div>
+      <div class="m">${p.orgs.map(chip).join("")}<span>${p.sessions} sessions</span><span>${p.prompts} prompts</span><span>${fmtN(p.tokens)} tokens</span><span>${fmtB(p.size)}</span><span>last ${when(p.last)}</span></div>
+      ${p.open || p.worktrees.length ? `<div class="m" style="gap:5px">${p.open ? `<span class="tag live"><i></i>${p.open} open</span>` : ""}${p.worktrees.map(w => `<span class="tag" title="Git worktree">⎇ ${esc(w)}</span>`).join("")}</div>` : ""}</div>
     <div class="acts">${p.exists ? `<button class="btn sm" data-open="${esc(p.cwd)}">${I.folder}Open</button>` : `<span class="badge">missing</span>`}</div></div>`).join("");
 }
 
@@ -538,7 +563,7 @@ function applyHash() {
 }
 window.addEventListener("hashchange", applyHash);
 $("#q").oninput = () => { showN = 100; renderSessions(); };
-$("#f-acct").onchange = $("#f-bg").onchange = () => { showN = 100; renderSessions(); };
+$("#f-acct").onchange = $("#f-src").onchange = $("#f-bg").onchange = () => { showN = 100; renderSessions(); };
 
 // ---------- data
 function renderHero() {
