@@ -121,6 +121,9 @@ select.input{flex:0 0 auto;padding-right:8px}
 .switch input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
 .switch input:checked{background:var(--foreground)}
 .switch input:checked::after{transform:translateX(12px);background:var(--background)}
+.switch.dim{opacity:.4}
+.brief-help{font-size:12.5px;line-height:1.55;color:var(--muted);border:1px solid var(--border);border-radius:12px;padding:10px 14px;background:var(--surface-2)}
+.brief-help b{color:var(--foreground);font-weight:500}
 
 /* steps */
 .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
@@ -228,6 +231,13 @@ textarea{width:100%;min-height:320px;resize:vertical;border:1px solid var(--bord
       </div>
       <textarea id="d-text" readonly spellcheck="false"></textarea>
       <div class="note" id="d-size"></div>
+      <div class="brief-help hidden" id="d-help">
+        <b>How Brief works.</b> It's a short note built on your computer from the saved transcript, so making it uses no tokens.
+        It includes the project folder and git branch, the files Claude edited, your last 5 requests, the summary Claude wrote
+        if the chat was compacted (trimmed), and Claude's last reply. It also includes the path to the full transcript, so the
+        new session can read more if it needs to. Paste it into a new session in the same project folder on the other account.
+        Claude will check the project, tell you where things stopped, and continue.
+      </div>
     </div>
     <div class="dlg-f">
       <button class="btn primary" id="d-copy">Copy to clipboard</button>
@@ -440,11 +450,20 @@ function renderActivity() {
 }
 
 // ---------- export dialog
-let cur = null, mode = "0";
+let cur = null, mode = "0", exportSeq = 0, exportAbort = null;
 async function loadExport() {
-  const ta = $("#d-text"); ta.value = "Loading…";
-  const r = mode === "brief" ? await fetch(`/api/brief?id=${cur.id}`) : await fetch(`/api/export?id=${cur.id}&turns=${mode}&tools=${$("#d-tools").checked ? 1 : 0}&compact=${$("#d-compact").checked ? 1 : 0}`);
-  const j = await r.json(); ta.value = j.text || j.error || "Nothing to export.";
+  // Only the latest request may update the preview; a slow earlier export must not overwrite it.
+  const seq = ++exportSeq;
+  if (exportAbort) exportAbort.abort();
+  exportAbort = new AbortController();
+  const ta = $("#d-text"); ta.value = "Loading…"; $("#d-size").textContent = "";
+  const url = mode === "brief" ? `/api/brief?id=${cur.id}`
+    : `/api/export?id=${cur.id}&turns=${mode}&tools=${$("#d-tools").checked ? 1 : 0}&compact=${$("#d-compact").checked ? 1 : 0}`;
+  let j;
+  try { j = await (await fetch(url, {signal: exportAbort.signal})).json(); }
+  catch (e) { if (e.name === "AbortError") return; j = {error: "Export failed: " + e.message}; }
+  if (seq !== exportSeq) return;
+  ta.value = j.text || j.error || "Nothing to export.";
   const c = ta.value.length;
   $("#d-size").textContent = `${c.toLocaleString()} characters · ≈${fmtN(Math.round(c / 3.6))} tokens` + (j.total ? ` · ${j.turns} of ${j.total} turns` : "") +
     (c > 120000 ? " · large; try fewer turns, Compact or Brief" : "");
@@ -456,9 +475,18 @@ function openExport(id) {
   $("#d-open").classList.toggle("hidden", !cur.cwd);
   $("#dlg").showModal(); loadExport();
 }
-$("#d-mode").onclick = e => { const b = e.target.closest("button"); if (!b) return; mode = b.dataset.t;
-  $("#d-mode").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); $("#d-tools").disabled = $("#d-compact").disabled = mode === "brief"; loadExport(); };
-$("#d-tools").onchange = $("#d-compact").onchange = loadExport;
+function setMode(t) {
+  mode = t;
+  $("#d-mode").querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.t === t));
+  $("#d-help").classList.toggle("hidden", t !== "brief");
+  // Brief ignores these options: dim them, but keep them clickable (clicking one leaves Brief).
+  document.querySelectorAll("#d-compact, #d-tools").forEach(el => {
+    el.closest(".switch").classList.toggle("dim", t === "brief");
+    el.closest(".switch").title = t === "brief" ? "Not used by Brief. Click to switch to Full chat." : "";
+  });
+}
+$("#d-mode").onclick = e => { const b = e.target.closest("button"); if (!b) return; setMode(b.dataset.t); loadExport(); };
+$("#d-tools").onchange = $("#d-compact").onchange = () => { if (mode === "brief") setMode("0"); loadExport(); };
 $("#d-close").onclick = () => $("#dlg").close();
 $("#d-copy").onclick = async () => { await copy($("#d-text").value); toast("Copied: paste it into a new session on the other account"); };
 $("#d-dl").onclick = () => {
