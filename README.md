@@ -18,6 +18,10 @@ a new session on another account and keep going.
 
 > Unofficial community tool. Not affiliated with or endorsed by Anthropic.
 
+![Overview: usage limits for three accounts, with the best one to use now](https://raw.githubusercontent.com/erenkarakoc/claude-accounts-dash/main/docs/screenshots/overview.png)
+
+<p align="center"><sub>Screenshots use generated demo data.</sub></p>
+
 ---
 
 ## Contents
@@ -25,6 +29,7 @@ a new session on another account and keep going.
 - [Install](#install)
 - [Usage](#usage)
 - [What's in the dashboard](#whats-in-the-dashboard)
+- [Screenshots](#screenshots)
 - [Continuing a session on another account](#continuing-a-session-on-another-account)
 - [Platform support](#platform-support)
 - [Where the data comes from](#where-the-data-comes-from)
@@ -101,6 +106,27 @@ every 30 seconds, and only re-reads files that changed. Stop it with `Ctrl+C`.
   day, and each account's share of tokens.
 
 Light and dark themes are available with the moon button.
+
+Links like `http://127.0.0.1:8765/#/activity` open a tab directly, and `#/handoff/export`
+opens the export for the newest session that hit a limit.
+
+## Screenshots
+
+**Export a session that hit its limit, ready to paste into another account**
+
+![Export chat dialog](https://raw.githubusercontent.com/erenkarakoc/claude-accounts-dash/main/docs/screenshots/handoff-export.png)
+
+**Every session from every account**
+
+![Sessions tab](https://raw.githubusercontent.com/erenkarakoc/claude-accounts-dash/main/docs/screenshots/sessions.png)
+
+**Activity: tokens per day by model, prompts by hour, tokens per account**
+
+![Activity tab](https://raw.githubusercontent.com/erenkarakoc/claude-accounts-dash/main/docs/screenshots/activity.png)
+
+**Light theme**
+
+![Overview in the light theme](https://raw.githubusercontent.com/erenkarakoc/claude-accounts-dash/main/docs/screenshots/overview-light.png)
 
 ## Continuing a session on another account
 
@@ -200,6 +226,16 @@ Run the tests (they use a fake data folder, not your real one):
 python -m unittest discover -s tests -v
 ```
 
+Try it with demo data instead of your own (this is how the screenshots are made):
+
+```bash
+python scripts/demo_data.py demo-data
+```
+
+Then run the dashboard with these environment variables set:
+`CLAUDE_ACCOUNTS_DASH_APP_DIR=demo-data/app`, `CLAUDE_CONFIG_DIR=demo-data/claude` and
+`CLAUDE_ACCOUNTS_DASH_CONFIG_DIR=demo-data/config`.
+
 Project layout:
 
 ```
@@ -207,6 +243,8 @@ src/claude_accounts_dash/
   server.py          reads local files, builds the data, serves the page and API
   static/index.html  the dashboard (plain HTML/CSS/JS, no build step)
 tests/               smoke tests with fixture data
+scripts/demo_data.py generates fake accounts and sessions for demos
+docs/screenshots/    images used in this README
 ```
 
 ### Releasing

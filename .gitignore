@@ -6,3 +6,4 @@ dist/
 .venv/
 venv/
 nicknames.json
+demo-data/

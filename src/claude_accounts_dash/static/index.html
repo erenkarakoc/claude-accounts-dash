@@ -258,6 +258,8 @@ const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).
 let D = null, lastFetch = 0, busy = false, showN = 100;
 
 try { if (localStorage.getItem("theme") === "light") document.documentElement.classList.remove("dark"); } catch {}
+{ const th = new URLSearchParams(location.search).get("theme");   // ?theme=light|dark overrides the saved theme
+  if (th) document.documentElement.classList.toggle("dark", th !== "light"); }
 $("#theme").onclick = () => {
   const dark = document.documentElement.classList.toggle("dark");
   try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch {}
@@ -473,7 +475,7 @@ function openExport(id) {
   $("#d-title").textContent = cur.title;
   $("#d-sub").innerHTML = `${chip(cur.org)} · ${esc(base(cur.cwd))} · ${cur.limit_hit ? "limit hit " + when(cur.limit_hit[0]) : "last active " + when(cur.last)}`;
   $("#d-open").classList.toggle("hidden", !cur.cwd);
-  $("#dlg").showModal(); loadExport();
+  $("#dlg").showModal(); $("#d-text").focus(); loadExport();
 }
 function setMode(t) {
   mode = t;
@@ -526,6 +528,15 @@ $("#tabs").onclick = e => {
   try { localStorage.setItem("tab", b.dataset.tab); } catch {}
 };
 try { const t = localStorage.getItem("tab"); if (t) document.querySelector(`.tab[data-tab="${t}"]`)?.click(); } catch {}
+// Links like #/activity open a tab; #/handoff/export also opens the export for the newest limit-hit session.
+// (The leading slash keeps the browser from jumping to an element with the same id.)
+function applyHash() {
+  const [tab, action] = decodeURIComponent(location.hash.replace(/^#\/?/, "")).split("/");
+  if (tab) document.querySelector(`.tab[data-tab="${tab}"]`)?.click();
+  if (action === "export") document.querySelector("#handoff [data-export]")?.click();
+  window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", applyHash);
 $("#q").oninput = () => { showN = 100; renderSessions(); };
 $("#f-acct").onchange = $("#f-bg").onchange = () => { showN = 100; renderSessions(); };
 
@@ -545,7 +556,9 @@ async function load() {
   try {
     const r = await fetch("/api/data"); const j = await r.json();
     if (j.error) throw new Error(j.error);
+    const first = !D;
     D = j; lastFetch = Date.now(); render();
+    if (first) applyHash();
   } catch (e) { $("#updated").textContent = "Error: " + e.message; }
   busy = false; $("#dot").classList.remove("busy");
 }
