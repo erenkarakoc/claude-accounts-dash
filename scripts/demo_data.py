@@ -35,6 +35,26 @@ PROJECTS = {
     "infra": ["terraform/staging/main.tf", "terraform/modules/db/variables.tf", ".github/workflows/deploy.yml", "k8s/api/deployment.yaml"],
 }
 
+PLAN = """Webhook retries:
+
+1. Store failed deliveries in a `webhook_retry` table (event id, attempt, next_run_at).
+2. Worker picks due rows every 30s; exponential backoff 1m, 5m, 30m, 2h, 12h.
+3. Give up after 5 attempts and alert in #billing.
+4. Tests: backoff schedule, idempotency on duplicate events, give-up path."""
+
+# Extra details that show the dashboard's tags: source, open now, jobs, worktrees, plans, archived.
+EXTRAS = {
+    "Postgres full-text search for docs": {"entry": "cli", "live": "busy"},
+    "Dark mode for the settings page": {"live": "idle", "worktree": "dark-mode"},
+    "Retry failed Stripe webhooks with backoff": {"plan": PLAN},
+    "Migrate auth to OAuth 2.1 + PKCE": {"plan": "## Plan\n1. Add PKCE to the login flow\n2. Rotate refresh tokens\n3. Remove the implicit grant"},
+    "Terraform: add a staging environment": {"entry": "cli"},
+    "CI: cache dependencies and split test jobs": {"entry": "sdk-cli", "job": ("ci-cache-audit", "working")},
+    "Landing page A/B test": {"archived": True},
+}
+DELETED = [("Scratch: try the Bun runtime", "acme-web", 2, 2.2, 3)]
+SCHEDULED = {1: ["Nightly dependency audit", "Weekly release notes draft"]}   # account index -> task names
+
 SESSIONS = [  # title, project, account index, days ago, prompts, hit limit
     ("Retry failed Stripe webhooks with backoff", "billing-api", 0, 0.08, 14, "session"),
     ("Checkout page: fix flaky payment test", "acme-web", 0, 0.3, 9, "session"),
@@ -113,9 +133,9 @@ def usage_history():
     return {"version": 2, "samples": samples}
 
 
-def transcript(sid, title, cwd, org, start, prompts, hit):
-    files = PROJECTS[Path(cwd).name]
-    base = {"sessionId": sid, "cwd": cwd, "gitBranch": "main", "entrypoint": "claude-desktop", "version": "2.1.281"}
+def transcript(sid, title, cwd, proj, org, start, prompts, hit, entry="claude-desktop", plan=None):
+    files = PROJECTS[proj]
+    base = {"sessionId": sid, "cwd": cwd, "gitBranch": "main", "entrypoint": entry, "version": "2.1.281"}
     out = [{**base, "type": "custom-title", "customTitle": title},
            {**base, "type": "bridge-session", "ownerAccountUuid": ACCOUNT_ID, "ownerOrganizationUuid": org}]
     t = start
@@ -149,6 +169,11 @@ def transcript(sid, title, cwd, org, start, prompts, hit):
             "id": f"msg_{uuid.uuid4().hex[:20]}", "model": model, "content": [{"type": "text", "text": rnd.choice(REPLIES)}],
             "usage": {"input_tokens": 12, "output_tokens": rnd.randint(300, 1200),
                       "cache_read_input_tokens": rnd.randint(40_000, 150_000), "cache_creation_input_tokens": rnd.randint(1_000, 8_000)}}})
+        if i == 0 and plan:
+            out.append({**base, "type": "assistant", "timestamp": iso(t + 1000), "message": {
+                "id": f"msg_{uuid.uuid4().hex[:20]}", "model": model,
+                "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": plan}}],
+                "usage": {"input_tokens": 8, "output_tokens": 420}}})
         t += rnd.randint(3, 25) * MIN
     if hit:
         reset = time.strftime("%I:%M%p", time.localtime((t + 3 * HOUR) / 1000)).lstrip("0").lower()
@@ -166,14 +191,17 @@ def main(dest):
         p.mkdir(parents=True, exist_ok=True)
     (app / "plan-usage-history.json").write_text(json.dumps(usage_history()), encoding="utf-8")
     (config / "nicknames.json").write_text(json.dumps({org: nick for org, nick, _, _ in ACCOUNTS}, indent=2), encoding="utf-8")
-    for n, (title, proj, acct, days_ago, prompts, hit) in enumerate(SESSIONS):
+    all_sessions = [(*x, False) for x in SESSIONS] + [(*x, None, True) for x in DELETED]
+    for n, (title, proj, acct, days_ago, prompts, hit, deleted) in enumerate(all_sessions):
+        extra = EXTRAS.get(title, {})
         org = ACCOUNTS[acct][0]
         sid = str(uuid.UUID(int=rnd.getrandbits(128), version=4))
-        cwd = f"{ROOT}/{proj}"
+        cwd = f"{ROOT}/{proj}" + (f"/.claude/worktrees/{extra['worktree']}" if extra.get("worktree") else "")
         duration = prompts * 9 * MIN
         start = NOW - int(days_ago * DAY) - duration
         start -= start % DAY % HOUR  # keep it tidy
-        lines, end = transcript(sid, title, cwd, org, start, prompts, hit)
+        entry = extra.get("entry", "claude-desktop")
+        lines, end = transcript(sid, title, cwd, proj, org, start, prompts, hit, entry, extra.get("plan"))
         tdir = claude / "projects" / ("-Users-alex-code-" + proj)
         tdir.mkdir(parents=True, exist_ok=True)
         with open(tdir / f"{sid}.jsonl", "w", encoding="utf-8") as f:
@@ -181,10 +209,26 @@ def main(dest):
                 f.write(json.dumps(line, ensure_ascii=False) + "\n")
         sdir = app / "claude-code-sessions" / ACCOUNT_ID / org
         sdir.mkdir(parents=True, exist_ok=True)
-        (sdir / f"local_{n:04d}.json").write_text(json.dumps({
-            "sessionId": f"local_{n:04d}", "cliSessionId": sid, "cwd": cwd, "title": title,
-            "createdAt": start, "lastActivityAt": end, "model": "claude-opus-5-5", "isArchived": False,
-            "completedTurns": prompts}), encoding="utf-8")
+        if deleted:   # the desktop app leaves a marker; the transcript stays on disk
+            (sdir / f"deleted_{sid}").write_text(str(NOW - HOUR), encoding="utf-8")
+        elif entry == "claude-desktop":
+            (sdir / f"local_{n:04d}.json").write_text(json.dumps({
+                "sessionId": f"local_{n:04d}", "cliSessionId": sid, "cwd": cwd, "title": title,
+                "createdAt": start, "lastActivityAt": end, "model": "claude-opus-5-5",
+                "isArchived": bool(extra.get("archived")), "completedTurns": prompts}), encoding="utf-8")
+        if extra.get("live"):   # no pid: counted as open while updatedAt is recent (10 minutes)
+            (claude / "sessions").mkdir(exist_ok=True)
+            (claude / "sessions" / f"{n}.json").write_text(json.dumps({
+                "sessionId": sid, "cwd": cwd, "status": extra["live"], "entrypoint": entry,
+                "kind": "interactive", "updatedAt": NOW, "startedAt": start}), encoding="utf-8")
+        if extra.get("job"):
+            jdir = claude / "jobs" / sid[:8]
+            jdir.mkdir(parents=True, exist_ok=True)
+            (jdir / "state.json").write_text(json.dumps({
+                "name": extra["job"][0], "state": extra["job"][1], "sessionId": sid}), encoding="utf-8")
+    for acct, names in SCHEDULED.items():
+        sdir = app / "claude-code-sessions" / ACCOUNT_ID / ACCOUNTS[acct][0]
+        (sdir / "scheduled-tasks.json").write_text(json.dumps({"scheduledTasks": [{"name": x} for x in names]}), encoding="utf-8")
     print(f"Demo data written to {dest}")
 
 

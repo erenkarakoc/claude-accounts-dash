@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claude Accounts</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111'/%3E%3Crect x='7' y='17' width='4' height='8' rx='2' fill='%23fff'/%3E%3Crect x='14' y='11' width='4' height='14' rx='2' fill='%23fff'/%3E%3Crect x='21' y='7' width='4' height='18' rx='2' fill='%233ecf8e'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -98,7 +99,9 @@ header{display:flex;align-items:center;gap:12px;padding:20px 0;border-bottom:1px
 .bar{height:6px;border-radius:99px;background:var(--track);overflow:hidden}
 .bar i{display:block;height:100%;border-radius:99px;background:var(--foreground);transition:width .5s}
 .bar i.good{background:var(--good)} .bar i.warn{background:var(--warn)} .bar i.bad{background:var(--bad)}
-.acct-foot{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);padding-top:12px}
+.acct-foot{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);padding-top:12px}
+.acct-foot>span:last-child{white-space:nowrap}
+.tag svg{width:11px;height:11px}
 .spark{width:100%;height:36px;display:block}
 .note{font-size:12px;color:var(--muted)}
 .hit{font-size:12px;color:var(--warn);background:var(--warn-bg);border-radius:8px;padding:6px 9px}
@@ -380,12 +383,13 @@ const I = {
 const SOURCES = {"claude-desktop": "Desktop", "cli": "CLI", "sdk-cli": "SDK", "sdk-ts": "SDK", "sdk-py": "SDK",
   "claude-vscode": "VS Code", "vscode": "VS Code", "jetbrains": "JetBrains", "claude-jetbrains": "JetBrains"};
 const source = s => s.entry ? (SOURCES[s.entry] || s.entry) : "Unknown";
+const BRANCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10"/><path d="M18 10c0 4-6 3-11 8"/></svg>';
 function statusTags(s) {
   let t = "";
   if (s.live) t += `<span class="tag live ${s.live.status === "busy" ? "busy" : ""}" title="Open right now"><i></i>${s.live.status === "busy" ? "Working" : "Open"}</span>`;
   if (s.job) t += `<span class="tag" title="Background job">Job · ${esc(s.job.state)}</span>`;
   t += `<span class="tag">${esc(source(s))}</span>`;
-  if (s.worktree) t += `<span class="tag" title="Git worktree">⎇ ${esc(s.worktree)}</span>`;
+  if (s.worktree) t += `<span class="tag" title="Git worktree">${BRANCH}${esc(s.worktree)}</span>`;
   if (s.plan) t += `<span class="tag" title="Has a plan; it's included when you export">Plan</span>`;
   if (s.archived) t += `<span class="tag">Archived</span>`;
   if (s.deleted) t += `<span class="tag" title="Deleted in the desktop app; the transcript is still on disk">Deleted</span>`;
@@ -441,7 +445,7 @@ function renderProjects() {
     <div style="min-width:0"><div class="t">${esc(base(p.cwd))}</div>
       <div class="m"><span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px">${esc(p.cwd)}</span></div>
       <div class="m">${p.orgs.map(chip).join("")}<span>${p.sessions} sessions</span><span>${p.prompts} prompts</span><span>${fmtN(p.tokens)} tokens</span><span>${fmtB(p.size)}</span><span>last ${when(p.last)}</span></div>
-      ${p.open || p.worktrees.length ? `<div class="m" style="gap:5px">${p.open ? `<span class="tag live"><i></i>${p.open} open</span>` : ""}${p.worktrees.map(w => `<span class="tag" title="Git worktree">⎇ ${esc(w)}</span>`).join("")}</div>` : ""}</div>
+      ${p.open || p.worktrees.length ? `<div class="m" style="gap:5px">${p.open ? `<span class="tag live"><i></i>${p.open} open</span>` : ""}${p.worktrees.map(w => `<span class="tag" title="Git worktree">${BRANCH}${esc(w)}</span>`).join("")}</div>` : ""}</div>
     <div class="acts">${p.exists ? `<button class="btn sm" data-open="${esc(p.cwd)}">${I.folder}Open</button>` : `<span class="badge">missing</span>`}</div></div>`).join("");
 }
 
