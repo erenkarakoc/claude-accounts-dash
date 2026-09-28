@@ -898,18 +898,35 @@ def open_folder(path):
 
 # ---------------------------------------------------------------- http
 
+# The browser closed the connection before the reply was sent (page reload, tab closed,
+# a newer refresh replacing an older one). Nothing to do: the next request will work.
+CLIENT_GONE = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], CLIENT_GONE):
+            return
+        super().handle_error(request, client_address)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
     def _send(self, code, body, ctype="application/json"):
         b = body if isinstance(body, bytes) else json.dumps(body, default=list).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", ctype + "; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(b)))
-        self.end_headers()
-        self.wfile.write(b)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype + "; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+        except CLIENT_GONE:
+            self.close_connection = True
 
     def do_GET(self):
         u = urlparse(self.path)
@@ -918,9 +935,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, page, "text/html")
         if u.path == "/api/data":
             try:
-                return self._send(200, build_data())
-            except Exception as e:
+                data = build_data()
+            except Exception as e:  # a real error while reading the local files
                 return self._send(500, {"error": str(e)})
+            return self._send(200, data)
         if u.path == "/api/brief":
             sid = (parse_qs(u.query).get("id") or [""])[0]
             text = handoff_brief(sid)
@@ -984,7 +1002,7 @@ def main(argv=None):
     INDEX.refresh()
     print(f"  {len(INDEX.files)} files indexed in {time.time() - t0:.1f}s", flush=True)
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
+        srv = Server(("127.0.0.1", a.port), Handler)
     except OSError:
         print(f"Port {a.port} is in use. Is the dashboard already running? Try --port {a.port + 1}", file=sys.stderr)
         return 1

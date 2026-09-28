@@ -216,6 +216,35 @@ class DashboardTest(unittest.TestCase):
             for k, v in old.items():
                 os.environ[k] = v
 
+    def test_client_disconnect_is_silent(self):
+        # The browser may drop the connection mid-reply (reload, closed tab, a newer refresh).
+        import contextlib
+        import io
+
+        class Gone:
+            def write(self, b):
+                raise ConnectionAbortedError(10053, "connection aborted by the client")
+
+        h = self.S.Handler.__new__(self.S.Handler)
+        h.send_response = h.send_header = lambda *a: None
+        h.end_headers = lambda: None
+        h.wfile = Gone()
+        h._send(200, {"ok": True})                       # must not raise
+        self.assertTrue(h.close_connection)
+
+        srv = self.S.Server(("127.0.0.1", 0), self.S.Handler)
+        try:
+            for exc, noisy in ((ConnectionResetError(), False), (ValueError("real bug"), True)):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    try:
+                        raise exc
+                    except Exception:
+                        srv.handle_error(None, ("127.0.0.1", 1))
+                self.assertEqual("Traceback" in err.getvalue(), noisy)   # real errors are still reported
+        finally:
+            srv.server_close()
+
     def test_cli_paths(self):
         self.assertEqual(self.S.main(["--paths"]), 0)
 
