@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Accounts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* shadcn/ui-style tokens, tuned to a Polar-like dark palette */
+:root{
+  --background:#fafafa; --surface:#ffffff; --surface-2:#f4f4f5; --border:#e6e6e8; --border-strong:#d4d4d8;
+  --foreground:#0a0a0a; --muted:#71717a; --faint:#a1a1aa;
+  --primary:#0a0a0a; --primary-fg:#ffffff;
+  --good:#16a34a; --good-bg:#e8f7ee; --warn:#c2410c; --warn-bg:#fdf0e7; --bad:#dc2626; --bad-bg:#fdecec;
+  --track:#ececef; --a1:#3b82f6; --a2:#d97706; --a3:#8b5cf6; --a4:#0d9488;
+  --radius:14px; --shadow:0 1px 2px rgba(0,0,0,.04);
+}
+.dark{
+  --background:#090909; --surface:#111111; --surface-2:#181818; --border:#212121; --border-strong:#2c2c2c;
+  --foreground:#ffffff; --muted:#858585; --faint:#5c5c5c;
+  --primary:#ffffff; --primary-fg:#0a0a0a;
+  --good:#3ecf8e; --good-bg:#0f2a1c; --warn:#f0a35e; --warn-bg:#2a1c0f; --bad:#f07171; --bad-bg:#2a1111;
+  --track:#1f1f1f; --a1:#6ea0ff; --a2:#f0b44c; --a3:#b69cff; --a4:#4fd1c5;
+  --shadow:none;
+}
+*{box-sizing:border-box;margin:0}
+html,body{background:var(--background);color:var(--foreground)}
+body{font:450 14px/1.5 Inter,system-ui,sans-serif;letter-spacing:.01em;-webkit-font-smoothing:antialiased;padding:0 16px 64px}
+.mono,.num{font-family:"Geist Mono",ui-monospace,monospace;font-feature-settings:"tnum"}
+button,input,select,textarea{font:inherit;color:inherit}
+.wrap{max-width:980px;margin:0 auto}
+
+/* header */
+header{display:flex;align-items:center;gap:12px;padding:20px 0;border-bottom:1px solid var(--border)}
+.brand{font-weight:500;font-size:15px}
+.spacer{flex:1}
+.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-bg)}
+.dot.busy{background:var(--warn);box-shadow:0 0 0 3px var(--warn-bg)}
+
+/* buttons / badges (shadcn shapes, Polar pills) */
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:999px;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-size:13px;white-space:nowrap;transition:background .15s,border-color .15s}
+.btn:hover{background:var(--surface-2);border-color:var(--border-strong)}
+.btn.primary{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
+.btn.primary:hover{opacity:.88}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{color:var(--foreground);background:var(--surface-2)}
+.btn.sm{height:28px;padding:0 11px;font-size:12px}
+.btn.icon{width:32px;padding:0;justify-content:center}
+.btn svg{width:14px;height:14px}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:500;border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+.badge.good{background:var(--good-bg);color:var(--good);border-color:transparent}
+.badge.warn{background:var(--warn-bg);color:var(--warn);border-color:transparent}
+.badge.bad{background:var(--bad-bg);color:var(--bad);border-color:transparent}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.chip b{width:8px;height:8px;border-radius:50%;display:inline-block}
+
+/* hero */
+.hero{padding:40px 0 28px}
+.hero h1{font-size:34px;font-weight:400;line-height:1.15;letter-spacing:-.01em}
+.hero h1 span{color:var(--muted)}
+
+/* tabs */
+.tabs{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--surface);margin-bottom:20px;overflow-x:auto;max-width:100%}
+.tab{height:30px;padding:0 14px;border-radius:999px;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:13px;white-space:nowrap}
+.tab:hover{color:var(--foreground)}
+.tab.on{background:var(--surface-2);color:var(--foreground);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.tab .n{margin-left:6px;font-size:11px;color:var(--faint)}
+
+/* cards */
+.grid{display:grid;gap:12px}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:820px){.g3,.g4{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.g3,.g4{grid-template-columns:1fr}.hero h1{font-size:26px}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card.pad{padding:18px}
+.card h3{font-size:13px;font-weight:500;color:var(--muted);margin-bottom:12px}
+.section{margin-top:12px}
+
+/* account card */
+.acct{padding:18px;display:flex;flex-direction:column;gap:14px;position:relative}
+.acct.best{border-color:color-mix(in srgb,var(--good) 45%,var(--border))}
+.acct-top{display:flex;align-items:flex-start;gap:10px}
+.acct-name{font-size:16px;font-weight:500;cursor:text;border-radius:6px;padding:0 4px;margin-left:-4px;outline:none}
+.acct-name:hover{background:var(--surface-2)}
+.acct-name:focus{background:var(--surface-2);box-shadow:0 0 0 1px var(--border-strong)}
+.acct-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.meter{display:flex;flex-direction:column;gap:6px}
+.meter-row{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;color:var(--muted)}
+.meter-row .num{color:var(--foreground);font-size:13px}
+.bar{height:6px;border-radius:99px;background:var(--track);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:99px;background:var(--foreground);transition:width .5s}
+.bar i.good{background:var(--good)} .bar i.warn{background:var(--warn)} .bar i.bad{background:var(--bad)}
+.acct-foot{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);padding-top:12px}
+.spark{width:100%;height:36px;display:block}
+.note{font-size:12px;color:var(--muted)}
+.hit{font-size:12px;color:var(--warn);background:var(--warn-bg);border-radius:8px;padding:6px 9px}
+
+/* stat tiles */
+.stat .k{font-size:12px;color:var(--muted)}
+.stat .v{font-size:22px;font-weight:400;margin-top:4px;font-family:"Geist Mono",monospace;letter-spacing:-.02em}
+
+/* table / list */
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.input{height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface);outline:none;min-width:0;flex:1 1 220px}
+.input:focus{border-color:var(--border-strong)}
+select.input{flex:0 0 auto;padding-right:8px}
+.list{overflow:hidden}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 16px;border-top:1px solid var(--border)}
+.row:first-child{border-top:0}
+.row:hover{background:color-mix(in srgb,var(--surface-2) 60%,transparent)}
+.row .t{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .m{font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:3px}
+.row .acts{display:flex;gap:6px;align-items:center}
+.empty{padding:36px 16px;text-align:center;color:var(--muted)}
+.more{display:flex;justify-content:center;padding:12px;border-top:1px solid var(--border)}
+.switch{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none}
+.switch input{appearance:none;width:30px;height:18px;border-radius:99px;background:var(--track);position:relative;cursor:pointer;transition:background .15s;border:1px solid var(--border)}
+.switch input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.switch input:checked{background:var(--foreground)}
+.switch input:checked::after{transform:translateX(12px);background:var(--background)}
+
+/* steps */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+@media(max-width:700px){.steps{grid-template-columns:1fr}}
+.step{padding:14px 16px}
+.step .n{font-family:"Geist Mono",monospace;font-size:11px;color:var(--faint)}
+.step p{font-size:13px;margin-top:4px}
+.step p span{color:var(--muted)}
+
+/* charts */
+.chart{width:100%;display:block;overflow:visible}
+.chart text{fill:var(--muted);font:11px "Geist Mono",monospace}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px}
+
+/* dialog */
+dialog{margin:auto;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--foreground);padding:0;width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 48px)}
+dialog::backdrop{background:rgba(0,0,0,.6);backdrop-filter:blur(2px)}
+.dlg{display:flex;flex-direction:column;max-height:calc(100vh - 50px)}
+.dlg-h{padding:18px 20px 14px;border-bottom:1px solid var(--border)}
+.dlg-h h2{font-size:17px;font-weight:500}
+.dlg-b{padding:14px 20px;display:flex;flex-direction:column;gap:12px;overflow:auto}
+.dlg-f{padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+textarea{width:100%;min-height:320px;resize:vertical;border:1px solid var(--border);border-radius:12px;background:var(--background);padding:12px 14px;font:12.5px/1.55 "Geist Mono",monospace;outline:none;color:var(--foreground)}
+.seg{display:inline-flex;padding:3px;gap:2px;border:1px solid var(--border);border-radius:999px}
+.seg button{height:26px;padding:0 11px;border-radius:999px;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:12.5px}
+.seg button.on{background:var(--surface-2);color:var(--foreground);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--primary);color:var(--primary-fg);padding:9px 16px;border-radius:999px;font-size:13px;transition:.2s;pointer-events:none;z-index:9}
+.toast.on{opacity:1;transform:translateX(-50%)}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">Claude Accounts</div>
+    <div class="spacer"></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="updated">Loading…</span></div>
+    <button class="btn icon ghost" id="refresh" title="Refresh now"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+    <button class="btn icon ghost" id="theme" title="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+  </header>
+
+  <section class="hero">
+    <h1 id="h-title">Your Claude accounts</h1>
+    <h1><span id="h-sub">Reading local files…</span></h1>
+  </section>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab on" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="handoff">Handoff<span class="n" id="n-handoff"></span></button>
+    <button class="tab" data-tab="sessions">Sessions<span class="n" id="n-sessions"></span></button>
+    <button class="tab" data-tab="projects">Projects<span class="n" id="n-projects"></span></button>
+    <button class="tab" data-tab="activity">Activity</button>
+  </nav>
+
+  <main>
+    <section data-panel="overview">
+      <div class="grid g3" id="accounts"></div>
+      <div class="grid g4 section" id="stats"></div>
+      <p class="note section">Limit percentages come from the desktop app's local usage history and only update while the app is signed in to that account. Values marked <span class="mono">~</span> are estimates.</p>
+    </section>
+
+    <section data-panel="handoff" class="hidden">
+      <div class="steps">
+        <div class="card step"><div class="n">01</div><p>Export the chat <span>of a session that hit its limit.</span></p></div>
+        <div class="card step"><div class="n">02</div><p>Switch account <span>in the desktop app and open a new session in the same folder.</span></p></div>
+        <div class="card step"><div class="n">03</div><p>Paste it <span>and Claude continues where the last one stopped.</span></p></div>
+      </div>
+      <div class="card list" id="handoff"></div>
+    </section>
+
+    <section data-panel="sessions" class="hidden">
+      <div class="toolbar">
+        <input class="input" id="q" placeholder="Search title, project or id…">
+        <select class="input" id="f-acct"></select>
+        <label class="switch"><input type="checkbox" id="f-bg"> Background</label>
+      </div>
+      <div class="card list" id="sessions"></div>
+    </section>
+
+    <section data-panel="projects" class="hidden">
+      <div class="card list" id="projects"></div>
+    </section>
+
+    <section data-panel="activity" class="hidden">
+      <div class="grid g4" id="tok-stats"></div>
+      <div class="card pad section"><h3>Tokens per day · last 30 active days</h3><div id="c-days"></div><div class="legend" id="l-days"></div></div>
+      <div class="grid g3 section" style="grid-template-columns:2fr 1fr">
+        <div class="card pad"><h3>Prompts by hour of day</h3><div id="c-hours"></div></div>
+        <div class="card pad"><h3>Tokens by account</h3><div id="c-accts"></div></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg">
+    <div class="dlg-h"><h2 id="d-title">Export chat</h2><div class="note" id="d-sub"></div></div>
+    <div class="dlg-b">
+      <div class="toolbar" style="margin:0">
+        <div class="seg" id="d-mode">
+          <button data-t="5">Last 5</button><button data-t="10">Last 10</button><button data-t="25">Last 25</button><button data-t="0" class="on">Full chat</button><button data-t="brief">Brief</button>
+        </div>
+        <label class="switch" title="Trim long pasted prompts, keep Claude's final reply per turn, summarize tool calls"><input type="checkbox" id="d-compact" checked> Compact</label>
+        <label class="switch"><input type="checkbox" id="d-tools" checked> Tool actions</label>
+      </div>
+      <textarea id="d-text" readonly spellcheck="false"></textarea>
+      <div class="note" id="d-size"></div>
+    </div>
+    <div class="dlg-f">
+      <button class="btn primary" id="d-copy">Copy to clipboard</button>
+      <button class="btn" id="d-dl">Download .md</button>
+      <button class="btn" id="d-open">Open project folder</button>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="d-close">Close</button>
+    </div>
+  </div>
+</dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const COLORS = ["--a1","--a2","--a3","--a4"];
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let D = null, lastFetch = 0, busy = false, showN = 100;
+
+try { if (localStorage.getItem("theme") === "light") document.documentElement.classList.remove("dark"); } catch {}
+$("#theme").onclick = () => {
+  const dark = document.documentElement.classList.toggle("dark");
+  try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch {}
+  render();
+};
+
+// ---------- formatting
+const fmtN = n => n >= 1e9 ? (n/1e9).toFixed(1)+"B" : n >= 1e6 ? (n/1e6).toFixed(1)+"M" : n >= 1e3 ? (n/1e3).toFixed(1)+"k" : String(n||0);
+const fmtB = b => b >= 1e9 ? (b/1e9).toFixed(1)+" GB" : b >= 1e6 ? (b/1e6).toFixed(1)+" MB" : b >= 1e3 ? Math.round(b/1e3)+" KB" : (b||0)+" B";
+const hm = ms => new Date(ms).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+function when(ms) {
+  if (!ms) return "—";
+  const d = new Date(ms), now = new Date();
+  if (d.toDateString() === now.toDateString()) return hm(ms);
+  const y = new Date(now); y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return "Yesterday " + hm(ms);
+  return d.toLocaleDateString([], {day:"numeric", month:"short"}) + " " + hm(ms);
+}
+function ago(ms) {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 60) return Math.floor(s) + "s ago";
+  if (s < 3600) return Math.floor(s/60) + "m ago";
+  if (s < 86400) return Math.floor(s/3600) + "h ago";
+  return Math.floor(s/86400) + "d ago";
+}
+function inT(ms) {
+  const m = Math.round((ms - Date.now()) / 60000);
+  if (m < 60) return m + "m";
+  if (m < 1440) return Math.floor(m/60) + "h " + (m%60) + "m";
+  return Math.floor(m/1440) + "d " + Math.floor((m%1440)/60) + "h";
+}
+const base = p => p ? p.split(/[\\/]/).filter(Boolean).pop() : "—";
+const lvl = p => p >= 90 ? "bad" : p >= 70 ? "warn" : "good";
+
+// ---------- accounts
+const acctIdx = org => Math.max(0, (D?.accounts || []).findIndex(a => a.org === org));
+const acctColor = org => `var(${COLORS[acctIdx(org) % COLORS.length]})`;
+const acctName = org => { const a = D?.accounts.find(x => x.org === org); return a ? (a.nick || a.short) : "Unknown"; };
+const chip = org => org ? `<span class="chip"><b style="background:${acctColor(org)}"></b>${esc(acctName(org))}</span>` : `<span class="chip"><b style="background:var(--faint)"></b>CLI / unknown</span>`;
+
+function spark(all) {
+  const hist = (all || []).filter(h => h[0] > Date.now() - 864e5);
+  if (hist.length < 2) return `<div class="note">No usage samples in the last 24h</div>`;
+  const W = 300, H = 36, t0 = hist[0][0], t1 = hist[hist.length-1][0] || t0 + 1;
+  const x = t => ((t - t0) / Math.max(1, t1 - t0)) * W, y = v => H - 2 - (Math.min(100, v || 0) / 100) * (H - 4);
+  const line = k => hist.map((h, i) => (i ? "L" : "M") + x(h[0]).toFixed(1) + " " + y(h[k]).toFixed(1)).join(" ");
+  const l1 = line(1);
+  return `<div><div class="meter-row" style="margin-bottom:4px"><span>5-hour usage · last 24h</span></div>
+    <svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <path d="${l1} L${W} ${H} L0 ${H}Z" fill="var(--foreground)" opacity=".06"/>
+    <path d="${l1}" fill="none" stroke="var(--foreground)" stroke-width="1.4" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></div>`;
+}
+
+function meter(label, pct, reset, stale) {
+  const p = pct ?? null;
+  return `<div class="meter"><div class="meter-row"><span>${label}</span>
+    <span>${reset ? `<span class="mono">resets ~${esc(when(reset))}</span> · ` : ""}<span class="num">${p === null ? "—" : (stale ? "~" : "") + p + "%"}</span></span></div>
+    <div class="bar"><i class="${p === null ? "" : lvl(p)}" style="width:${Math.min(100, p || 0)}%"></i></div></div>`;
+}
+
+function renderAccounts() {
+  $("#accounts").innerHTML = D.accounts.map(a => {
+    const l = a.limits, best = a.org === D.best;
+    const fh = l ? l.fh_now : null, sd = l ? l.sd_now : null;
+    let badge = `<span class="badge">No data</span>`;
+    if (l) badge = best && fh < 90 ? `<span class="badge good">● Use now</span>` : fh >= 100 || sd >= 100 ? `<span class="badge bad">Limit reached</span>` : fh >= 70 ? `<span class="badge warn">Running low</span>` : `<span class="badge good">Available</span>`;
+    const hk = a.last_limit_hit?.[2], hitAge = a.last_limit_hit ? Date.now() - a.last_limit_hit[0] : Infinity;
+    const hit = l && a.last_limit_hit && (hk === "weekly" ? sd >= 100 && hitAge < 7*864e5 : fh >= 100 && hitAge < 5*36e5)
+      ? `<div class="hit">${esc(a.last_limit_hit[1].replace(/\s*\([^)]*\)\s*$/, ""))}</div>` : "";
+    return `<div class="card acct ${best ? "best" : ""}">
+      <div class="acct-top">
+        <div style="flex:1;min-width:0">
+          <div><span class="acct-name" contenteditable="plaintext-only" spellcheck="false" data-org="${a.org}" title="Click to rename">${esc(a.nick || a.short)}</span></div>
+          <div class="acct-sub"><span class="chip"><b style="background:${acctColor(a.org)}"></b><span class="mono">${a.short}</span></span></div>
+          ${a.email ? `<div class="acct-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.email)}">${esc(a.email)}${a.cli_active ? " · CLI" : ""}</div>` : ""}
+        </div>${badge}
+      </div>
+      ${meter("5-hour", fh, l?.fh_reset, l && fh !== l.fh)}
+      ${meter("Weekly", sd, l?.sd_reset, l && sd !== l.sd)}
+      ${spark(l?.history)}
+      ${hit}
+      <div class="acct-foot"><span>${a.sessions} sessions</span><span>${l ? "seen " + ago(l.last_seen) : "no usage data"}</span></div>
+    </div>`;
+  }).join("") || `<div class="card empty">No accounts found in local files.</div>`;
+
+  document.querySelectorAll(".acct-name").forEach(el => {
+    el.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } if (e.key === "Escape") { el.textContent = acctName(el.dataset.org); el.blur(); } };
+    el.onblur = async () => {
+      const a = D.accounts.find(x => x.org === el.dataset.org), v = el.textContent.trim();
+      const nick = v === a.short ? "" : v;
+      if (nick === a.nick) { el.textContent = a.nick || a.short; return; }
+      await fetch("/api/nick", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({org:a.org, nick})});
+      a.nick = nick; toast(nick ? "Renamed to " + nick : "Name reset"); render();
+    };
+  });
+}
+
+function renderStats() {
+  const t = D.totals, hits = D.sessions.filter(s => s.limit_hit && !s.background).length;
+  const fg = D.sessions.filter(s => !s.background).length;
+  const tiles = [["Sessions", fg], ["Projects", D.counts.projects], ["Transcripts on disk", fmtB(D.counts.size)], ["Limit hits recorded", hits]];
+  $("#stats").innerHTML = tiles.map(([k, v]) => `<div class="card pad stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  const tt = [["Output tokens", fmtN(t.output||0)], ["Input tokens", fmtN(t.input||0)], ["Cache writes", fmtN(t.cache_write||0)], ["Cache reads", fmtN(t.cache_read||0)]];
+  $("#tok-stats").innerHTML = tt.map(([k, v]) => `<div class="card pad stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+}
+
+// ---------- lists
+const I = {
+  export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>',
+};
+
+function sessionRow(s, withHit) {
+  const hit = withHit && s.limit_hit ? `<span style="color:var(--warn)">${esc(s.limit_hit[1].replace(/^You've hit your /, "").replace(/\s*\([^)]*\)\s*$/, ""))}</span>` : "";
+  return `<div class="row">
+    <div style="min-width:0">
+      <div class="t" title="${esc(s.title)}">${esc(s.title)}</div>
+      <div class="m">${chip(s.org)}<span>${esc(base(s.cwd))}</span><span>${withHit && s.limit_hit ? "hit " + when(s.limit_hit[0]) : when(s.last)}</span>
+        ${s.prompts ? `<span>${s.prompts} prompts</span>` : ""}<span>${fmtB(s.size)}</span>${hit}${s.archived ? "<span>archived</span>" : ""}</div>
+    </div>
+    <div class="acts">
+      ${s.path ? `<button class="btn sm ${withHit ? "primary" : ""}" data-export="${s.id}">${I.export}Export chat</button>` : ""}
+      <button class="btn sm icon" data-copy="${s.id}" title="Copy session id"><span class="mono" style="font-size:10px">ID</span></button>
+    </div></div>`;
+}
+
+function renderHandoff() {
+  const hits = D.sessions.filter(s => s.limit_hit && !s.background).sort((a, b) => b.limit_hit[0] - a.limit_hit[0]);
+  $("#n-handoff").textContent = hits.length || "";
+  const recent = hits.slice(0, 30);
+  $("#handoff").innerHTML = recent.length ? recent.map(s => sessionRow(s, true)).join("")
+    : `<div class="empty">No sessions have hit a limit yet.</div>`;
+}
+
+function renderSessions() {
+  const q = $("#q").value.trim().toLowerCase(), fa = $("#f-acct").value, bg = $("#f-bg").checked;
+  const list = D.sessions.filter(s => (bg || !s.background) && (!fa || s.org === fa) &&
+    (!q || [s.title, s.cwd, s.id].some(v => (v || "").toLowerCase().includes(q))));
+  $("#n-sessions").textContent = D.sessions.filter(s => !s.background).length;
+  $("#sessions").innerHTML = (list.slice(0, showN).map(s => sessionRow(s, false)).join("") ||
+    `<div class="empty">No sessions match.</div>`) +
+    (list.length > showN ? `<div class="more"><button class="btn sm" id="more">Show more (${list.length - showN})</button></div>` : "");
+  const m = $("#more"); if (m) m.onclick = () => { showN += 100; renderSessions(); };
+}
+
+function renderAcctFilter() {
+  const sel = $("#f-acct"), cur = sel.value;
+  sel.innerHTML = `<option value="">All accounts</option>` + D.accounts.map(a => `<option value="${a.org}">${esc(a.nick || a.short)}</option>`).join("");
+  sel.value = cur;
+}
+
+function renderProjects() {
+  $("#n-projects").textContent = D.projects.length;
+  $("#projects").innerHTML = D.projects.map(p => `<div class="row">
+    <div style="min-width:0"><div class="t">${esc(base(p.cwd))}</div>
+      <div class="m"><span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px">${esc(p.cwd)}</span></div>
+      <div class="m">${p.orgs.map(chip).join("")}<span>${p.sessions} sessions</span><span>${p.prompts} prompts</span><span>${fmtN(p.tokens)} tokens</span><span>${fmtB(p.size)}</span><span>last ${when(p.last)}</span></div></div>
+    <div class="acts">${p.exists ? `<button class="btn sm" data-open="${esc(p.cwd)}">${I.folder}Open</button>` : `<span class="badge">missing</span>`}</div></div>`).join("");
+}
+
+// ---------- charts (plain SVG, no library)
+function renderActivity() {
+  const A = D.activity, models = Object.keys(A.tokens), n = A.days.length;
+  const palette = ["--foreground", "--a1", "--a2", "--a3", "--a4", "--muted"];
+  if (!n) { $("#c-days").innerHTML = `<div class="empty">No activity yet.</div>`; return; }
+  const tot = A.days.map((_, i) => models.reduce((s, m) => s + A.tokens[m][i], 0)), max = Math.max(1, ...tot);
+  const W = 900, H = 170, bw = W / n;
+  let bars = "";
+  A.days.forEach((d, i) => {
+    let y = H;
+    models.forEach((m, k) => {
+      const h = (A.tokens[m][i] / max) * (H - 10);
+      if (h > 0) { y -= h; bars += `<rect x="${i*bw+2}" y="${y}" width="${Math.max(1, bw-4)}" height="${h}" rx="2" fill="var(${palette[k % palette.length]})"><title>${d} · ${m}: ${fmtN(A.tokens[m][i])}</title></rect>`; }
+    });
+  });
+  const lbl = A.days.map((d, i) => i % Math.ceil(n / 8) ? "" : `<text x="${i*bw + bw/2}" y="${H + 16}" text-anchor="middle">${d.slice(5)}</text>`).join("");
+  $("#c-days").innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H + 22}"><text x="0" y="10">${fmtN(max)}</text><line x1="0" x2="${W}" y1="${H}" y2="${H}" stroke="var(--border)"/>${bars}${lbl}</svg>`;
+  $("#l-days").innerHTML = models.map((m, k) => `<span class="chip"><b style="background:var(${palette[k % palette.length]})"></b>${esc(m)}</span>`).join("");
+
+  const hs = A.hours, hm2 = Math.max(1, ...hs), HW = 480, HH = 110, hb = HW / 24;
+  $("#c-hours").innerHTML = `<svg class="chart" viewBox="0 0 ${HW} ${HH + 20}">${hs.map((v, h) => `<rect x="${h*hb+2}" y="${HH - (v/hm2)*(HH-4)}" width="${hb-4}" height="${(v/hm2)*(HH-4)}" rx="2" fill="var(--foreground)" opacity="${.25 + .75*(v/hm2)}"><title>${h}:00 · ${v} prompts</title></rect>`).join("")}
+    <line x1="0" x2="${HW}" y1="${HH}" y2="${HH}" stroke="var(--border)"/>${[0,6,12,18,23].map(h => `<text x="${h*hb + hb/2}" y="${HH + 15}" text-anchor="middle">${h}</text>`).join("")}</svg>`;
+
+  const sum = t => (t.input||0) + (t.output||0) + (t.cache_write||0);
+  const acc = D.accounts.map(a => [a, sum(a.tokens)]).filter(x => x[1] > 0), at = acc.reduce((s, x) => s + x[1], 0) || 1;
+  $("#c-accts").innerHTML = acc.length ? `<div class="bar" style="height:10px;display:flex;gap:2px;background:transparent">${acc.map(([a, v]) => `<i style="width:${v/at*100}%;background:${acctColor(a.org)}"></i>`).join("")}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">${acc.map(([a, v]) => `<div class="meter-row">${chip(a.org)}<span class="num">${fmtN(v)} · ${Math.round(v/at*100)}%</span></div>`).join("")}</div>
+    <p class="note" style="margin-top:12px">Input + output + cache writes. Sessions are counted under the account that owns them in the desktop app.</p>`
+    : `<div class="empty">No token data.</div>`;
+}
+
+// ---------- export dialog
+let cur = null, mode = "0";
+async function loadExport() {
+  const ta = $("#d-text"); ta.value = "Loading…";
+  const r = mode === "brief" ? await fetch(`/api/brief?id=${cur.id}`) : await fetch(`/api/export?id=${cur.id}&turns=${mode}&tools=${$("#d-tools").checked ? 1 : 0}&compact=${$("#d-compact").checked ? 1 : 0}`);
+  const j = await r.json(); ta.value = j.text || j.error || "Nothing to export.";
+  const c = ta.value.length;
+  $("#d-size").textContent = `${c.toLocaleString()} characters · ≈${fmtN(Math.round(c / 3.6))} tokens` + (j.total ? ` · ${j.turns} of ${j.total} turns` : "") +
+    (c > 120000 ? " · large; try fewer turns, Compact or Brief" : "");
+}
+function openExport(id) {
+  cur = D.sessions.find(s => s.id === id); if (!cur) return;
+  $("#d-title").textContent = cur.title;
+  $("#d-sub").innerHTML = `${chip(cur.org)} · ${esc(base(cur.cwd))} · ${cur.limit_hit ? "limit hit " + when(cur.limit_hit[0]) : "last active " + when(cur.last)}`;
+  $("#d-open").classList.toggle("hidden", !cur.cwd);
+  $("#dlg").showModal(); loadExport();
+}
+$("#d-mode").onclick = e => { const b = e.target.closest("button"); if (!b) return; mode = b.dataset.t;
+  $("#d-mode").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); $("#d-tools").disabled = $("#d-compact").disabled = mode === "brief"; loadExport(); };
+$("#d-tools").onchange = $("#d-compact").onchange = loadExport;
+$("#d-close").onclick = () => $("#dlg").close();
+$("#d-copy").onclick = async () => { await copy($("#d-text").value); toast("Copied: paste it into a new session on the other account"); };
+$("#d-dl").onclick = () => {
+  const a = document.createElement("a"), name = (cur.title || "handoff").replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 60);
+  a.href = URL.createObjectURL(new Blob([$("#d-text").value], {type: "text/markdown"})); a.download = `handoff-${name}.md`; a.click();
+};
+$("#d-open").onclick = () => openFolder(cur.cwd);
+
+async function copy(t) {
+  try { await navigator.clipboard.writeText(t); }
+  catch { const ta = $("#d-text"); ta.select(); document.execCommand("copy"); }
+}
+async function openFolder(p) {
+  const r = await fetch("/api/open", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({path: p})});
+  toast(r.ok ? "Opened in Explorer" : "Folder not available");
+}
+function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), 2200); }
+
+document.addEventListener("click", async e => {
+  const x = e.target.closest("[data-export],[data-copy],[data-open]"); if (!x) return;
+  if (x.dataset.export) openExport(x.dataset.export);
+  if (x.dataset.copy) { await navigator.clipboard.writeText(x.dataset.copy).catch(() => {}); toast("Session id copied"); }
+  if (x.dataset.open) openFolder(x.dataset.open);
+});
+
+// ---------- tabs
+$("#tabs").onclick = e => {
+  const b = e.target.closest(".tab"); if (!b) return;
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t === b));
+  document.querySelectorAll("[data-panel]").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
+  try { localStorage.setItem("tab", b.dataset.tab); } catch {}
+};
+try { const t = localStorage.getItem("tab"); if (t) document.querySelector(`.tab[data-tab="${t}"]`)?.click(); } catch {}
+$("#q").oninput = () => { showN = 100; renderSessions(); };
+$("#f-acct").onchange = $("#f-bg").onchange = () => { showN = 100; renderSessions(); };
+
+// ---------- data
+function renderHero() {
+  const best = D.accounts.find(a => a.org === D.best);
+  const avail = D.accounts.filter(a => a.limits && a.limits.fh_now < 100 && a.limits.sd_now < 100).length;
+  $("#h-title").textContent = `${avail} of ${D.accounts.length} accounts available`;
+  $("#h-sub").textContent = best ? `Best to use now: ${best.nick || best.short} (${best.limits.fh_now}% of 5-hour used)` : "No usage data yet";
+}
+function render() {
+  if (!D || document.querySelector(".acct-name:focus")) return;
+  renderHero(); renderAccounts(); renderStats(); renderHandoff(); renderAcctFilter(); renderSessions(); renderProjects(); renderActivity();
+}
+async function load() {
+  if (busy) return; busy = true; $("#dot").classList.add("busy");
+  try {
+    const r = await fetch("/api/data"); const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    D = j; lastFetch = Date.now(); render();
+  } catch (e) { $("#updated").textContent = "Error: " + e.message; }
+  busy = false; $("#dot").classList.remove("busy");
+}
+$("#refresh").onclick = load;
+setInterval(() => { if (lastFetch) $("#updated").textContent = "Updated " + ago(lastFetch); }, 1000);
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+load();
+</script>
+</body>
+</html>

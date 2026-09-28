@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-dash"
+dynamic = ["version"]
+description = "Local dashboard for your Claude accounts: usage limits, sessions, projects and chat handoff between accounts."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+authors = [{ name = "Eren Karakoc" }]
+keywords = ["claude", "dashboard", "usage", "limits", "claude-code"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Utilities",
+]
+dependencies = []
+
+[project.scripts]
+claude-dash = "claude_dash.server:main"
+
+[project.urls]
+Homepage = "https://github.com/erenkarakoc/claude-dash"
+Issues = "https://github.com/erenkarakoc/claude-dash/issues"
+
+[tool.hatch.version]
+path = "src/claude_dash/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claude_dash"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/claude_dash", "tests", "README.md", "LICENSE", "pyproject.toml"]
