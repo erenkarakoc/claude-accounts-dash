@@ -174,7 +174,7 @@ the account recorded in the transcript where possible.
 
 | | `<app data>` | `<config>` |
 |---|---|---|
-| Windows | `%APPDATA%\Claude` | `%APPDATA%\claude-accounts-dash` |
+| Windows | `%APPDATA%\Claude`, or for the Microsoft Store / MSIX app `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude` (the most recently used one is picked) | `%APPDATA%\claude-accounts-dash` |
 | macOS | `~/Library/Application Support/Claude` | `~/.config/claude-accounts-dash` |
 | Linux | `$XDG_CONFIG_HOME/Claude` (default `~/.config/Claude`) | `$XDG_CONFIG_HOME/claude-accounts-dash` |
 
@@ -201,6 +201,9 @@ Environment variables, all optional:
 - **"Port 8765 is in use"**: the dashboard is probably already running in another terminal.
   Open `http://127.0.0.1:8765`, or start another one with `--port 8766`.
 - **No accounts or limits shown**: run `claude-accounts-dash --paths` to see which folders were found.
+  On Windows, the Microsoft Store (MSIX) version of the Claude app stores its data in a private
+  package folder, which is detected automatically since 0.1.4. If it still isn't found, point to it
+  with `CLAUDE_ACCOUNTS_DASH_APP_DIR`.
   Limits need the Claude desktop app. Sign in to each account in the app at least once.
 - **An account's numbers look old**: open the desktop app signed in to that account. It
   updates the usage history in the background.

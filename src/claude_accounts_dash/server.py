@@ -30,10 +30,41 @@ from . import __version__
 HOME = Path.home()
 
 
+def _windows_app_data_dirs():
+    """Candidate Claude data folders on Windows.
+
+    The packaged (MSIX / Microsoft Store) app writes %APPDATA% into a private
+    per-package folder. Programs started from inside the app see it as
+    %APPDATA%\\Claude, but a normal terminal only finds it under
+    %LOCALAPPDATA%\\Packages\\Claude_<id>\\LocalCache\\Roaming\\Claude.
+    """
+    roaming = Path(os.environ.get("APPDATA", HOME / "AppData" / "Roaming"))
+    local = Path(os.environ.get("LOCALAPPDATA", HOME / "AppData" / "Local"))
+    dirs = [roaming / "Claude"]
+    try:
+        dirs += sorted(p / "LocalCache" / "Roaming" / "Claude" for p in (local / "Packages").glob("Claude_*"))
+    except OSError:
+        pass
+    return dirs
+
+
+def _last_written(folder):
+    """How recently the desktop app wrote usage data here (0 if it never did)."""
+    times = []
+    for name in ("plan-usage-history.json", "claude-code-sessions"):
+        try:
+            times.append((folder / name).stat().st_mtime)
+        except OSError:
+            pass
+    return max(times, default=0)
+
+
 def _app_data_dir():
     """Per-OS folder where the Claude desktop app keeps its data."""
     if sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", HOME / "AppData" / "Roaming")) / "Claude"
+        dirs = _windows_app_data_dirs()
+        used = [d for d in dirs if _last_written(d)]
+        return max(used, key=_last_written) if used else dirs[0]
     if sys.platform == "darwin":
         return HOME / "Library" / "Application Support" / "Claude"
     return Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "Claude"

@@ -3,6 +3,7 @@ import importlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -140,6 +141,24 @@ class DashboardTest(unittest.TestCase):
         finally:
             srv.shutdown()
             srv.server_close()
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows-only folder layout")
+    def test_finds_packaged_windows_app_data(self):
+        # MSIX/Store installs keep the data under %LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude
+        root = self.tmp / "win"
+        packaged = root / "Local" / "Packages" / "Claude_abc123" / "LocalCache" / "Roaming" / "Claude"
+        packaged.mkdir(parents=True)
+        (packaged / "plan-usage-history.json").write_text("{}", encoding="utf-8")
+        (root / "Roaming").mkdir()
+        old = {k: os.environ.get(k) for k in ("APPDATA", "LOCALAPPDATA")}
+        os.environ.update(APPDATA=str(root / "Roaming"), LOCALAPPDATA=str(root / "Local"))
+        try:
+            self.assertEqual(self.S._app_data_dir(), packaged)
+            (root / "Roaming" / "Claude").mkdir()      # an empty unpackaged folder must not win
+            self.assertEqual(self.S._app_data_dir(), packaged)
+        finally:
+            for k, v in old.items():
+                os.environ[k] = v
 
     def test_cli_paths(self):
         self.assertEqual(self.S.main(["--paths"]), 0)
