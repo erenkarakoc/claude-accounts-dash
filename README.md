@@ -12,8 +12,9 @@ and when one account hits its limit, export the conversation so you can paste it
 a new session on another account and keep going.
 
 - **Private**: reads files that are already on your computer. Nothing is uploaded, and
-  the server only listens on `127.0.0.1`.
-- **Lightweight**: pure Python standard library, with no dependencies. It starts in a few seconds.
+  the server only listens on `127.0.0.1` and only answers requests addressed to this machine.
+- **Lightweight**: pure Python standard library, with no dependencies. After the first run it
+  starts in well under a second.
 - **Cross-platform**: Windows, macOS and Linux, Python 3.9+.
 
 > Unofficial community tool. Not affiliated with or endorsed by Anthropic.
@@ -66,13 +67,19 @@ claude-accounts-dash
 ```
 
 The first start indexes your local transcripts, which takes a few seconds for hundreds of
-sessions. It then opens `http://127.0.0.1:8765` in your browser. The page refreshes itself
-every 30 seconds, and only re-reads files that changed. Stop it with `Ctrl+C`.
+sessions. The index is saved, so later starts only read what changed and take a fraction of a
+second. It then opens `http://127.0.0.1:8765` in your browser. The page refreshes itself every
+30 seconds, and only re-reads files that changed. Stop it with `Ctrl+C`.
+
+The terminal shows a summary of every account (5-hour and weekly usage, reset times, which one
+to use now), and keeps printing a line whenever an account hits its limit or becomes available
+again. Colors are turned off when the output isn't a terminal or `NO_COLOR` is set.
 
 | Option | Description |
 |---|---|
 | `--port 9000` | Listen on another port (default `8765`) |
 | `--no-browser` | Don't open the browser automatically |
+| `--no-cache` | Re-read every transcript instead of using the saved index |
 | `--paths` | Print which local folders it reads and whether they exist, then exit |
 | `--version` | Print the version |
 | `-h`, `--help` | Show help |
@@ -82,8 +89,8 @@ every 30 seconds, and only re-reads files that changed. Stop it with `Ctrl+C`.
 ## What's in the dashboard
 
 **Overview**
-- One card per account with its **5-hour** and **weekly** usage, estimated reset times,
-  and a chart of the last 24 hours.
+- One card per account with its **5-hour** and **weekly** usage, reset times (exact when
+  Claude reported one, estimated otherwise), and a chart of the last 24 hours.
 - A **"Use now"** badge on the account with the most room left, and a warning when an
   account is currently blocked by a limit, showing the reset time Claude reported.
 - How many sessions are open on each account, and its desktop **scheduled tasks**.
@@ -186,20 +193,27 @@ the account recorded in the transcript where possible.
 | Plans | `~/.claude/plans/*.md` |
 | Signed-in CLI account (email shown on its card) | `~/.claude.json` |
 | Your nicknames (written by claude-accounts-dash) | `<config>/nicknames.json` |
+| Saved transcript index, for fast starts (written by claude-accounts-dash) | `<cache>/index.json.gz` |
 
-| | `<app data>` | `<config>` |
-|---|---|---|
-| Windows | `%APPDATA%\Claude`, or for the Microsoft Store / MSIX app `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude` (the most recently used one is picked) | `%APPDATA%\claude-accounts-dash` |
-| macOS | `~/Library/Application Support/Claude` | `~/.config/claude-accounts-dash` |
-| Linux | `$XDG_CONFIG_HOME/Claude` (default `~/.config/Claude`) | `$XDG_CONFIG_HOME/claude-accounts-dash` |
+| | `<app data>` | `<config>` | `<cache>` |
+|---|---|---|---|
+| Windows | `%APPDATA%\Claude`, or for the Microsoft Store / MSIX app `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude` (the most recently used one is picked) | `%APPDATA%\claude-accounts-dash` | `%LOCALAPPDATA%\claude-accounts-dash` |
+| macOS | `~/Library/Application Support/Claude` | `~/.config/claude-accounts-dash` | `~/Library/Caches/claude-accounts-dash` |
+| Linux | `$XDG_CONFIG_HOME/Claude` (default `~/.config/Claude`) | `$XDG_CONFIG_HOME/claude-accounts-dash` | `$XDG_CACHE_HOME/claude-accounts-dash` (default `~/.cache/...`) |
 
-claude-accounts-dash never modifies Claude's files. The only file it writes is `nicknames.json`.
+claude-accounts-dash never modifies Claude's files. The only files it writes are `nicknames.json`
+and the index cache. The cache can be deleted at any time; it is rebuilt on the next start.
 
 **About the limit numbers:** the desktop app records usage only while it is signed in to that
 account, so an account you haven't opened for a while shows its last known value. When the
 estimated reset time has passed, the dashboard assumes the window has reset and marks the value
-with `~`. Reset times are estimated from the recorded samples; the exact reset time from Claude's
-"You've hit your limit" message is shown when one exists.
+with `~`. When Claude has shown a "You've hit your limit · resets 6:40pm" message, that exact time is
+used (shown without `~`), and the account is marked full until then. Otherwise reset times are
+estimated from the recorded samples.
+
+**Security:** the server listens only on `127.0.0.1` and rejects requests whose `Host` header isn't
+`127.0.0.1`, `localhost` or `[::1]`. That blocks DNS rebinding, where a website points its own
+domain at your machine to read local servers.
 
 ## Configuration
 
@@ -210,6 +224,8 @@ Environment variables, all optional:
 | `CLAUDE_ACCOUNTS_DASH_APP_DIR` | Use a different Claude desktop app data folder |
 | `CLAUDE_CONFIG_DIR` | Use a different `.claude` folder (same variable Claude Code uses) |
 | `CLAUDE_ACCOUNTS_DASH_CONFIG_DIR` | Where to store `nicknames.json` |
+| `CLAUDE_ACCOUNTS_DASH_CACHE_DIR` | Where to store the transcript index cache |
+| `NO_COLOR` | Plain terminal output without colors |
 
 ## Troubleshooting
 

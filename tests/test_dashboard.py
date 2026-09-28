@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -107,8 +108,10 @@ class DashboardTest(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = Path(tempfile.mkdtemp(prefix="claude-accounts-dash-test-"))
         app, claude, cfg, cls.proj = make_fixture(cls.tmp)
-        cls._env = {k: os.environ.get(k) for k in ("CLAUDE_ACCOUNTS_DASH_APP_DIR", "CLAUDE_CONFIG_DIR", "CLAUDE_ACCOUNTS_DASH_CONFIG_DIR")}
-        os.environ.update(CLAUDE_ACCOUNTS_DASH_APP_DIR=str(app), CLAUDE_CONFIG_DIR=str(claude), CLAUDE_ACCOUNTS_DASH_CONFIG_DIR=str(cfg))
+        cls._env = {k: os.environ.get(k) for k in ("CLAUDE_ACCOUNTS_DASH_APP_DIR", "CLAUDE_CONFIG_DIR",
+                                                   "CLAUDE_ACCOUNTS_DASH_CONFIG_DIR", "CLAUDE_ACCOUNTS_DASH_CACHE_DIR")}
+        os.environ.update(CLAUDE_ACCOUNTS_DASH_APP_DIR=str(app), CLAUDE_CONFIG_DIR=str(claude),
+                          CLAUDE_ACCOUNTS_DASH_CONFIG_DIR=str(cfg), CLAUDE_ACCOUNTS_DASH_CACHE_DIR=str(cls.tmp / "cache"))
         import claude_accounts_dash.server as server
         cls.S = importlib.reload(server)
 
@@ -244,6 +247,72 @@ class DashboardTest(unittest.TestCase):
                 self.assertEqual("Traceback" in err.getvalue(), noisy)   # real errors are still reported
         finally:
             srv.server_close()
+
+    def test_parse_reset(self):
+        from datetime import datetime, timezone
+        ms = lambda *a: int(datetime(*a, tzinfo=timezone.utc).timestamp() * 1000)
+        P = self.S.parse_reset
+        # later the same day, and past midnight
+        self.assertEqual(P("You've hit your session limit · resets 8:20pm (UTC)", ms(2026, 9, 28, 17, 0)), ms(2026, 9, 28, 20, 20))
+        self.assertEqual(P("You've hit your session limit · resets 1am (UTC)", ms(2026, 9, 28, 22, 0)), ms(2026, 9, 29, 1, 0))
+        self.assertEqual(P("resets 12:40am (UTC)", ms(2026, 9, 28, 21, 0)), ms(2026, 9, 29, 0, 40))
+        self.assertEqual(P("resets 12pm (UTC)", ms(2026, 9, 28, 9, 0)), ms(2026, 9, 28, 12, 0))
+        # weekly with a date, including a year change
+        self.assertEqual(P("You've hit your weekly limit · resets Aug 3, 1am (UTC)", ms(2026, 7, 30, 16, 0)), ms(2026, 8, 3, 1, 0))
+        self.assertEqual(P("resets Jan 2, 9am (UTC)", ms(2026, 12, 30, 10, 0)), ms(2027, 1, 2, 9, 0))
+        self.assertIsNone(P("You've hit your limit", ms(2026, 9, 28, 17, 0)))
+
+    def test_exact_reset_overrides_estimate(self):
+        now = int(time.time() * 1000)
+        est = {"fh": 60, "sd": 20, "fh_now": 60, "sd_now": 20, "fh_reset": now + 9_000_000, "sd_reset": None,
+               "last_seen": now - 600_000, "history": []}
+        hit = (now - 60_000, "You've hit your session limit", "session", now + 3_600_000)
+        out = self.S.apply_exact_resets(est, [hit], now)
+        self.assertEqual((out["fh_now"], out["fh_reset"], out.get("fh_exact")), (100, now + 3_600_000, True))
+        self.assertEqual(out["sd_now"], 20)
+        # the reset already passed and no newer sample: usage is back to 0
+        old = (now - 7_200_000, "", "session", now - 60_000)
+        self.assertEqual(self.S.apply_exact_resets({**est, "fh_now": 100, "last_seen": now - 3_600_000}, [old], now)["fh_now"], 0)
+        # an account with no usage samples still gets a card from its limit message
+        bare = self.S.apply_exact_resets(None, [(now - 60_000, "", "weekly", now + 86_400_000)], now)
+        self.assertEqual((bare["sd_now"], bare["fh_now"], bare["no_samples"]), (100, None, True))
+        self.assertIsNone(self.S.apply_exact_resets(None, [old], now))
+
+    def test_host_header_is_checked(self):
+        ok = self.S.host_allowed
+        for h in ("127.0.0.1:8765", "localhost:8765", "localhost", "[::1]:8765", "LOCALHOST."):
+            self.assertTrue(ok(h), h)
+        for h in ("evil.example:8765", "127.0.0.1.evil.example", "", None, "localhost.evil.com:8765"):
+            self.assertFalse(ok(h), h)
+        srv = self.S.Server(("127.0.0.1", 0), self.S.Handler)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/api/data", headers={"Host": f"rebind.example:{port}"})
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(req)
+            self.assertEqual(e.exception.code, 403)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_index_cache_round_trip(self):
+        before = self.S.build_data()
+        self.S.INDEX.save_cache(force=True)
+        self.assertTrue(self.S.CACHE_FILE.exists())
+        fresh = self.S.TranscriptIndex()
+        self.assertEqual(fresh.load_cache(), len(self.S.INDEX.files))
+        fresh.refresh()
+        self.assertEqual(fresh.parsed, 0)                       # nothing re-read
+        old, self.S.INDEX = self.S.INDEX, fresh
+        try:
+            after = self.S.build_data()
+        finally:
+            self.S.INDEX = old
+        strip = lambda d: [{k: v for k, v in r.items() if k != "live"} for r in d["sessions"]]
+        self.assertEqual(json.loads(json.dumps(strip(after))), json.loads(json.dumps(strip(before))))
+        self.assertEqual(after["activity"], before["activity"])
+        self.assertIn("Build the API", self.S.handoff_brief(SID))
 
     def test_cli_paths(self):
         self.assertEqual(self.S.main(["--paths"]), 0)

@@ -34,7 +34,9 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 /* header */
 header{display:flex;align-items:center;gap:12px;padding:20px 0;border-bottom:1px solid var(--border)}
-.brand{font-weight:500;font-size:15px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:500;font-size:15px}
+.brand svg{width:26px;height:26px;border-radius:7px;flex:none}
+.dark .brand svg{outline:1px solid var(--border-strong);outline-offset:-1px}
 .spacer{flex:1}
 .status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-bg)}
@@ -166,7 +168,7 @@ textarea{width:100%;min-height:320px;resize:vertical;border:1px solid var(--bord
 <body>
 <div class="wrap">
   <header>
-    <div class="brand">Claude Accounts</div>
+    <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#111"/><rect x="7" y="17" width="4" height="8" rx="2" fill="#fff"/><rect x="14" y="11" width="4" height="14" rx="2" fill="#fff"/><rect x="21" y="7" width="4" height="18" rx="2" fill="#3ecf8e"/></svg>Claude Accounts</div>
     <div class="spacer"></div>
     <div class="status"><span class="dot" id="dot"></span><span id="updated">Loading…</span></div>
     <button class="btn icon ghost" id="refresh" title="Refresh now"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
@@ -322,10 +324,10 @@ function spark(all) {
     <path d="${l1}" fill="none" stroke="var(--foreground)" stroke-width="1.4" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg></div>`;
 }
 
-function meter(label, pct, reset, stale) {
+function meter(label, pct, reset, stale, exact) {
   const p = pct ?? null;
   return `<div class="meter"><div class="meter-row"><span>${label}</span>
-    <span>${reset ? `<span class="mono">resets ~${esc(when(reset))}</span> · ` : ""}<span class="num">${p === null ? "—" : (stale ? "~" : "") + p + "%"}</span></span></div>
+    <span>${reset ? `<span class="mono" title="${exact ? "Exact time from Claude's limit message" : "Estimated from usage samples"}">resets ${exact ? "" : "~"}${esc(when(reset))}</span> · ` : ""}<span class="num">${p === null ? "—" : (stale ? "~" : "") + p + "%"}</span></span></div>
     <div class="bar"><i class="${p === null ? "" : lvl(p)}" style="width:${Math.min(100, p || 0)}%"></i></div></div>`;
 }
 
@@ -334,9 +336,10 @@ function renderAccounts() {
     const l = a.limits, best = a.org === D.best;
     const fh = l ? l.fh_now : null, sd = l ? l.sd_now : null;
     let badge = `<span class="badge">No data</span>`;
-    if (l) badge = best && fh < 90 ? `<span class="badge good">● Use now</span>` : fh >= 100 || sd >= 100 ? `<span class="badge bad">Limit reached</span>` : fh >= 70 ? `<span class="badge warn">Running low</span>` : `<span class="badge good">Available</span>`;
+    if (l) badge = best && fh != null && fh < 90 ? `<span class="badge good">● Use now</span>` : fh >= 100 || sd >= 100 ? `<span class="badge bad">Limit reached</span>` : fh >= 70 ? `<span class="badge warn">Running low</span>` : `<span class="badge good">Available</span>`;
     const hk = a.last_limit_hit?.[2], hitAge = a.last_limit_hit ? Date.now() - a.last_limit_hit[0] : Infinity;
-    const hit = l && a.last_limit_hit && (hk === "weekly" ? sd >= 100 && hitAge < 7*864e5 : fh >= 100 && hitAge < 5*36e5)
+    const hitReset = a.last_limit_hit?.[3], hitLive = hitReset ? hitReset > Date.now() : hitAge < (hk === "weekly" ? 7*864e5 : 5*36e5);
+    const hit = l && a.last_limit_hit && hitLive && (hk === "weekly" ? sd >= 100 : fh >= 100)
       ? `<div class="hit">${esc(a.last_limit_hit[1].replace(/\s*\([^)]*\)\s*$/, ""))}</div>` : "";
     return `<div class="card acct ${best ? "best" : ""}">
       <div class="acct-top">
@@ -346,11 +349,11 @@ function renderAccounts() {
           ${a.email ? `<div class="acct-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.email)}">${esc(a.email)}${a.cli_active ? " · CLI" : ""}</div>` : ""}
         </div>${badge}
       </div>
-      ${meter("5-hour", fh, l?.fh_reset, l && fh !== l.fh)}
-      ${meter("Weekly", sd, l?.sd_reset, l && sd !== l.sd)}
+      ${meter("5-hour", fh, l?.fh_reset, l && !l.fh_exact && fh !== l.fh, l?.fh_exact)}
+      ${meter("Weekly", sd, l?.sd_reset, l && !l.sd_exact && sd !== l.sd, l?.sd_exact)}
       ${spark(l?.history)}
       ${hit}
-      <div class="acct-foot"><span>${a.sessions} sessions${a.open ? ` · <span style="color:var(--good)">${a.open} open</span>` : ""}${a.scheduled.length ? ` · <span title="${esc(a.scheduled.join("\n"))}">${a.scheduled.length} scheduled</span>` : ""}</span><span>${l ? "seen " + ago(l.last_seen) : "no usage data"}</span></div>
+      <div class="acct-foot"><span>${a.sessions} sessions${a.open ? ` · <span style="color:var(--good)">${a.open} open</span>` : ""}${a.scheduled.length ? ` · <span title="${esc(a.scheduled.join("\n"))}">${a.scheduled.length} scheduled</span>` : ""}</span><span>${!l ? "no usage data" : l.no_samples ? "from limit message" : "seen " + ago(l.last_seen)}</span></div>
     </div>`;
   }).join("") || `<div class="card empty">No accounts found in local files.</div>`;
 

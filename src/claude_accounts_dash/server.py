@@ -10,6 +10,7 @@ Reads only local files:
 Nothing is sent anywhere; the server listens on 127.0.0.1 only.
 """
 import argparse
+import gzip
 import json
 import os
 import re
@@ -18,14 +19,15 @@ import sys
 import threading
 import time
 import webbrowser
+import zlib
 from collections import Counter, defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__
+from . import __version__, term
 
 HOME = Path.home()
 
@@ -79,6 +81,17 @@ def _config_dir():
     return Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "claude-accounts-dash"
 
 
+def _cache_dir():
+    """Where this tool keeps its transcript index so the next start is fast."""
+    if os.environ.get("CLAUDE_ACCOUNTS_DASH_CACHE_DIR"):
+        return Path(os.environ["CLAUDE_ACCOUNTS_DASH_CACHE_DIR"])
+    if sys.platform == "win32":
+        return Path(os.environ.get("LOCALAPPDATA", HOME / "AppData" / "Local")) / "claude-accounts-dash"
+    if sys.platform == "darwin":
+        return HOME / "Library" / "Caches" / "claude-accounts-dash"
+    return Path(os.environ.get("XDG_CACHE_HOME", HOME / ".cache")) / "claude-accounts-dash"
+
+
 DESKTOP_DIR = Path(os.environ.get("CLAUDE_ACCOUNTS_DASH_APP_DIR") or _app_data_dir())
 USAGE_FILE = DESKTOP_DIR / "plan-usage-history.json"
 DESKTOP_SESSIONS = DESKTOP_DIR / "claude-code-sessions"
@@ -86,6 +99,7 @@ CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude")
 PROJECTS_DIR = CLAUDE_HOME / "projects"
 CLI_CONFIG = HOME / ".claude.json"
 NICK_FILE = _config_dir() / "nicknames.json"
+CACHE_FILE = _cache_dir() / "index.json.gz"
 
 FIVE_H = 5 * 3600 * 1000
 SEVEN_D = 7 * 24 * 3600 * 1000
@@ -109,6 +123,62 @@ def iso_ms(ts):
 
 def local_dt(ms):
     return datetime.fromtimestamp(ms / 1000)
+
+
+RESET_RE = re.compile(r"resets\s+(?:([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)"
+                      r"(?:\s*\(([^)]+)\))?", re.I)
+MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+
+
+def _zone(name):
+    """tzinfo for an IANA zone name, or None (= this computer's local time).
+
+    Windows Python has no time zone database unless `tzdata` is installed; the zone in
+    Claude's message is the user's own zone, so local time is the right fallback.
+    """
+    if not name:
+        return None
+    if name.upper() in ("UTC", "GMT"):
+        return timezone.utc
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:
+        return None
+
+
+def parse_reset(text, hit_ms):
+    """Exact reset time (ms) from a limit message such as
+    "You've hit your session limit · resets 6:40pm (Europe/Istanbul)" or
+    "You've hit your weekly limit · resets Aug 3, 1am (Europe/Istanbul)".
+    The message only has a local time, so it is resolved relative to when it was shown.
+    """
+    m = RESET_RE.search(text or "")
+    if not m or not hit_ms:
+        return None
+    mon, day, hour, minute, ampm, zone = m.groups()
+    hour = int(hour) % 12 + (12 if ampm.lower() == "pm" else 0)
+    minute = int(minute or 0)
+    if hour > 23 or minute > 59:
+        return None
+    tz = _zone(zone)
+    hit = datetime.fromtimestamp(hit_ms / 1000, tz)
+    try:
+        if mon:
+            if mon.lower() not in MONTHS:
+                return None
+            at = hit.replace(month=MONTHS.index(mon.lower()) + 1, day=int(day), hour=hour, minute=minute,
+                             second=0, microsecond=0)
+            if at < hit - timedelta(days=1):          # "resets Jan 2" shown in late December
+                at = at.replace(year=at.year + 1)
+        else:
+            at = hit.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if at <= hit:
+                at += timedelta(days=1)
+    except ValueError:
+        return None
+    ms = int(at.timestamp() * 1000)
+    return ms if 0 < ms - hit_ms <= SEVEN_D + 86_400_000 else None
 
 
 # ---------------------------------------------------------------- limits
@@ -157,6 +227,37 @@ def build_limits(now_ms):
             "sd_reset": sd_reset if (sd_reset and sd_reset > now_ms) else None,
             "last_seen": last["t"], "samples": len(samples), "history": hist,
         }
+    return out
+
+
+def apply_exact_resets(lim, hits, now_ms):
+    """Replace estimated reset times with the exact ones from Claude's "limit reached" messages.
+
+    hits: (ms, text, kind, reset_ms) tuples. The latest message of each kind wins. While its
+    reset is ahead the limit is full; once it has passed with no newer sample, usage is back to 0.
+    Accounts without usage samples (never opened in the desktop app) still get a card this way.
+    """
+    latest = {}
+    for h in hits:
+        if len(h) > 3 and h[3] and (h[2] not in latest or h[0] > latest[h[2]][0]):
+            latest[h[2]] = h
+    if not latest:
+        return lim
+    out = dict(lim) if lim else {"fh": None, "sd": None, "xu": None, "fh_now": None, "sd_now": None,
+                                 "fh_reset": None, "sd_reset": None, "last_seen": None, "samples": 0,
+                                 "history": [], "no_samples": True}
+    for kind, key in (("session", "fh"), ("weekly", "sd")):
+        h = latest.get(kind)
+        if not h:
+            continue
+        seen = out["last_seen"] or 0
+        if h[3] > now_ms:
+            if h[0] >= seen or (out[key + "_now"] or 0) >= 100:
+                out[key + "_now"], out[key + "_reset"], out[key + "_exact"] = 100, h[3], True
+        elif seen < h[3]:
+            out[key + "_now"], out[key + "_reset"] = (0 if lim else None), None
+    if not lim and all(out[k] is None for k in ("fh_now", "sd_now")):
+        return None
     return out
 
 
@@ -311,10 +412,11 @@ class FileState:
     __slots__ = ("offset", "sid", "title", "cwd", "branch", "first", "last", "prompts",
                  "asst", "tok", "models", "daily", "hours", "owner_org", "msg_ids",
                  "last_prompts", "last_text", "files", "cost", "is_sub", "entry", "limit_hit", "summary",
-                 "plan_path", "plan_text")
+                 "plan_path", "plan_text", "head")
 
     def __init__(self, is_sub):
         self.offset = 0
+        self.head = None            # hash of the file's first bytes: detects a rewritten file
         self.sid = self.title = self.cwd = self.branch = self.owner_org = None
         self.first = self.last = None
         self.prompts = self.asst = 0
@@ -329,25 +431,112 @@ class FileState:
         self.cost = None
         self.is_sub = is_sub
         self.entry = None
-        self.limit_hit = None       # (ms, text, kind)
+        self.limit_hit = None       # (ms, text, kind, exact reset ms or None)
         self.summary = None
         self.plan_path = None       # plan file Claude wrote (~/.claude/plans/*.md)
         self.plan_text = None       # plan submitted with ExitPlanMode
 
+    # JSON form for the on-disk cache
+    def to_json(self):
+        return {
+            "offset": self.offset, "head": self.head, "sid": self.sid, "title": self.title, "cwd": self.cwd,
+            "branch": self.branch, "owner_org": self.owner_org, "first": self.first, "last": self.last,
+            "prompts": self.prompts, "asst": self.asst, "tok": self.tok, "models": self.models,
+            "daily": self.daily, "hours": self.hours,
+            # streamed blocks of one message are adjacent lines, so only the latest ids matter
+            "msg_ids": list(self.msg_ids)[-50:], "last_prompts": list(self.last_prompts),
+            "last_text": self.last_text, "files": self.files, "cost": self.cost, "is_sub": self.is_sub,
+            "entry": self.entry, "limit_hit": self.limit_hit, "summary": self.summary,
+            "plan_path": self.plan_path, "plan_text": self.plan_text,
+        }
+
+    @classmethod
+    def from_json(cls, d):
+        st = cls(bool(d.get("is_sub")))
+        for k in ("offset", "head", "sid", "title", "cwd", "branch", "owner_org", "first", "last", "prompts",
+                  "asst", "last_text", "files", "cost", "entry", "summary", "plan_path", "plan_text"):
+            if k in d:
+                setattr(st, k, d[k])
+        st.tok, st.models = Counter(d.get("tok") or {}), Counter(d.get("models") or {})
+        st.hours = Counter({int(h): n for h, n in (d.get("hours") or {}).items()})
+        for day, c in (d.get("daily") or {}).items():
+            st.daily[day] = Counter(c)
+        st.msg_ids = set(d.get("msg_ids") or [])
+        st.last_prompts.extend(d.get("last_prompts") or [])
+        st.limit_hit = tuple(d["limit_hit"]) if d.get("limit_hit") else None
+        return st
+
+
+HEAD_BYTES = 512
+
+
+def head_hash(data):
+    return zlib.crc32(data[:HEAD_BYTES]) if len(data) >= HEAD_BYTES else None
+
+
+def file_head(path):
+    try:
+        with open(path, "rb") as f:
+            return head_hash(f.read(HEAD_BYTES))
+    except OSError:
+        return None
+
 
 class TranscriptIndex:
+    CACHE_VERSION = 1
+
     def __init__(self):
         self.files = {}
         self.lock = threading.Lock()
         self.scanning = False
         self.progress = [0, 0]
+        self.use_cache = True
+        self.dirty = False
+        self.saved_at = 0
+        self.parsed = 0
 
-    def refresh(self):
+    def load_cache(self):
+        """Reuse the index from the last run. Returns how many files it covered."""
+        if not self.use_cache:
+            return 0
+        try:
+            with gzip.open(CACHE_FILE, "rt", encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError, EOFError):
+            return 0
+        if d.get("version") != self.CACHE_VERSION or d.get("app") != __version__ or d.get("root") != str(PROJECTS_DIR):
+            return 0
+        with self.lock:
+            try:
+                self.files = {k: FileState.from_json(v) for k, v in (d.get("files") or {}).items()}
+            except Exception:
+                self.files = {}
+        return len(self.files)
+
+    def save_cache(self, force=False):
+        """Write the index to disk (at most once a minute unless forced). Never fails loudly."""
+        if not self.use_cache or not (self.dirty or force) or (not force and time.time() - self.saved_at < 60):
+            return
+        with self.lock:
+            data = {"version": self.CACHE_VERSION, "app": __version__, "root": str(PROJECTS_DIR),
+                    "files": {k: st.to_json() for k, st in self.files.items()}}
+            self.dirty = False
+        self.saved_at = time.time()
+        try:
+            CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = CACHE_FILE.with_suffix(".tmp")
+            with gzip.open(tmp, "wt", encoding="utf-8", compresslevel=1) as f:
+                json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp, CACHE_FILE)
+        except OSError:
+            pass
+
+    def refresh(self, on_progress=None):
         with self.lock:
             if not PROJECTS_DIR.is_dir():
                 return
             paths = list(PROJECTS_DIR.rglob("*.jsonl"))
-            self.scanning, self.progress = True, [0, len(paths)]
+            self.scanning, self.progress, self.parsed = True, [0, len(paths)], 0
             seen = set()
             for p in paths:
                 key = str(p)
@@ -357,20 +546,29 @@ class TranscriptIndex:
                 except OSError:
                     continue
                 st = self.files.get(key)
-                if st is None or size < st.offset:          # new or truncated -> reparse
+                # new, truncated or rewritten (different first bytes) -> reparse from the start
+                if st is None or size < st.offset or (st.head is not None and size > st.offset and st.head != file_head(p)):
                     st = self.files[key] = FileState("subagents" in p.parts)
                 if size > st.offset:
                     self._parse(p, st)
+                    self.dirty = True
+                    self.parsed += 1
                 self.progress[0] += 1
+                if on_progress:
+                    on_progress(self.progress[0], self.progress[1])
             for k in list(self.files):
                 if k not in seen:
                     del self.files[k]
+                    self.dirty = True
             self.scanning = False
+        self.save_cache()
 
     def _parse(self, path, st):
         with open(path, "rb") as f:
             f.seek(st.offset)
             chunk = f.read()
+        if st.head is None:
+            st.head = file_head(path)
         end = chunk.rfind(b"\n")
         if end < 0:
             return
@@ -435,7 +633,7 @@ class TranscriptIndex:
                 txt = "".join(b.get("text", "") for b in (msg.get("content") or []) if isinstance(b, dict))
                 kind = "weekly" if "weekly" in txt else "session"
                 if ms and (not st.limit_hit or ms >= st.limit_hit[0]):
-                    st.limit_hit = (ms, txt.strip()[:160], kind)
+                    st.limit_hit = (ms, txt.strip()[:160], kind, parse_reset(txt, ms))
                 return
             for b in msg.get("content") or []:
                 if isinstance(b, dict) and b.get("type") == "tool_use":
@@ -615,8 +813,8 @@ def build_data():
         tok = Counter()
         for r in mine:
             tok.update(r["tokens"])
-        lim = limits.get(org)
         hits = [r["limit_hit"] for r in mine if r["limit_hit"] and not r["hidden"]]
+        lim = apply_exact_resets(limits.get(org), [r["limit_hit"] for r in mine if r["limit_hit"]], now)
         accounts.append({
             "org": org, "short": short(org), "nick": nicks.get(org) or "",
             "email": cli.get("emailAddress") if cli.get("organizationUuid") == org else None,
@@ -630,8 +828,8 @@ def build_data():
         })
     # best account to use now: lowest current 5h, then lowest weekly
     def score(a):
-        l = a["limits"]
-        return (l["fh_now"] if l else 101, l["sd_now"] if l else 101)
+        l = a["limits"] or {}
+        return (101 if l.get("fh_now") is None else l["fh_now"], 101 if l.get("sd_now") is None else l["sd_now"])
     accounts.sort(key=lambda a: (a["nick"] or "~") + a["org"])
     candidates = [a for a in accounts if a["limits"]]
     best = min(candidates, key=score)["org"] if candidates else None
@@ -912,9 +1110,32 @@ class Server(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+
+def host_allowed(host):
+    """True if the Host header names this machine.
+
+    Blocks DNS rebinding: a website can point its own domain at 127.0.0.1 and then read
+    this server as "same origin", but the browser still sends that domain as the Host.
+    """
+    host = (host or "").strip().lower()
+    if host.startswith("["):
+        name = host[: host.find("]") + 1]
+    else:
+        name = host.rsplit(":", 1)[0] if ":" in host else host
+    return name.rstrip(".") in LOCAL_HOSTS
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def _host_ok(self):
+        if host_allowed(self.headers.get("Host")):
+            return True
+        self._send(403, {"error": "forbidden host"})
+        return False
 
     def _send(self, code, body, ctype="application/json"):
         b = body if isinstance(body, bytes) else json.dumps(body, default=list).encode("utf-8")
@@ -929,6 +1150,8 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def do_GET(self):
+        if not self._host_ok():
+            return
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
             page = resources.files("claude_accounts_dash").joinpath("static/index.html").read_bytes()
@@ -938,6 +1161,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = build_data()
             except Exception as e:  # a real error while reading the local files
                 return self._send(500, {"error": str(e)})
+            STATUS.observe(data)
             return self._send(200, data)
         if u.path == "/api/brief":
             sid = (parse_qs(u.query).get("id") or [""])[0]
@@ -955,6 +1179,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._host_ok():
+            return
         # Only accept same-origin requests (blocks other websites from poking the local server)
         origin = self.headers.get("Origin")
         host = self.headers.get("Host", "")
@@ -985,35 +1211,153 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
 
+def account_name(a):
+    return a.get("nick") or a.get("short") or short(a.get("org"))
+
+
+def account_state(a):
+    l = a.get("limits")
+    if not l:
+        return None
+    fh, sd = l.get("fh_now"), l.get("sd_now")
+    if (fh or 0) >= 100 or (sd or 0) >= 100:
+        return "limit"
+    return "low" if (fh or 0) >= 70 else "ok"
+
+
+def clock(ms):
+    return local_dt(ms).strftime("%H:%M") if ms else ""
+
+
+def reset_label(ms):
+    """"23:40" today, "Tue 01:00" within a week."""
+    if not ms:
+        return ""
+    at = local_dt(ms)
+    return at.strftime("%H:%M") if at.date() == datetime.now().date() else at.strftime("%a %H:%M")
+
+
+class StatusLog:
+    """Prints a line in the terminal when an account's limit state changes."""
+
+    def __init__(self):
+        self.prev = None
+        self.lock = threading.Lock()
+
+    def observe(self, data):
+        cur = {a["org"]: (account_state(a), a) for a in data.get("accounts", [])}
+        with self.lock:
+            prev, self.prev = self.prev, cur
+        if prev is None:
+            return
+        for org, (state, a) in cur.items():
+            before = (prev.get(org) or (None,))[0]
+            if state == before or state is None:
+                continue
+            l = a["limits"] or {}
+            if state == "limit":
+                full = [l.get(k + "_reset") for k in ("fh", "sd") if (l.get(k + "_now") or 0) >= 100]
+                reset = max(filter(None, full), default=None)     # when it is usable again
+                msg = term.red("limit reached") + (term.gray(f" {term.SEP} resets {reset_label(reset)}") if reset else "")
+            elif state == "low":
+                msg = term.yellow(f"running low ({l.get('fh_now')}% of 5-hour used)")
+            else:
+                msg = term.green("available again" if before == "limit" else "available")
+            print(f"  {term.gray(time.strftime('%H:%M'))}  {term.bold(account_name(a))}  {msg}", flush=True)
+
+
+STATUS = StatusLog()
+
+
+def print_accounts(data):
+    accounts = data.get("accounts") or []
+    if not accounts:
+        print(f"  {term.gray('No accounts found yet. Run with --paths to see which folders were read.')}")
+        return
+    width = max(len(account_name(a)) for a in accounts)
+    for a in accounts:
+        l = a.get("limits") or {}
+        state = account_state(a)
+        color = {"limit": term.red, "low": term.yellow, "ok": term.green}.get(state, term.gray)
+        name = term.pad(term.bold(account_name(a)), width)
+        if not l:
+            print(f"  {color(term.DOT)} {name}  {term.gray('no usage data')}")
+            continue
+        line = (f"  {color(term.DOT)} {name}  {term.gray('5h')} {term.bar(l.get('fh_now'), 10)} {term.pct_text(l.get('fh_now'))}"
+                f"   {term.gray('week')} {term.bar(l.get('sd_now'), 10)} {term.pct_text(l.get('sd_now'))}")
+        notes = []
+        for key in ("fh", "sd"):
+            if (l.get(key + "_now") or 0) >= 100 and l.get(key + "_reset"):
+                notes.append(term.gray(("resets " if l.get(key + "_exact") else "resets ~") + reset_label(l[key + "_reset"])))
+        if a["org"] == data.get("best") and state == "ok":
+            notes.append(term.bgreen("use now"))
+        if a.get("open"):
+            notes.append(term.cyan(f"{a['open']} open"))
+        print(line + ("   " + term.gray(f" {term.SEP} ").join(notes) if notes else ""))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="claude-accounts-dash", description="Local dashboard for your Claude accounts, limits and sessions.")
     ap.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
     ap.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+    ap.add_argument("--no-cache", action="store_true", help="re-read every transcript instead of using the saved index")
     ap.add_argument("--paths", action="store_true", help="print the local folders it reads and exit")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     a = ap.parse_args(argv)
+    term.setup()
     if a.paths:
         for label, p in [("Desktop app data", DESKTOP_DIR), ("Usage history", USAGE_FILE),
-                         ("Transcripts", PROJECTS_DIR), ("Nicknames", NICK_FILE)]:
-            print(f"{label:17} {p}  {'(found)' if p.exists() else '(missing)'}")
+                         ("Transcripts", PROJECTS_DIR), ("Nicknames", NICK_FILE), ("Index cache", CACHE_FILE)]:
+            found = term.green(term.OK + " found") if p.exists() else term.gray("- missing")
+            print(f"  {label:17} {p}  {found}")
         return 0
+
+    print(f"\n  {term.logo()}  {term.bold('Claude Accounts')} {term.gray('v' + __version__)}\n", flush=True)
     t0 = time.time()
-    print("Indexing local transcripts...", flush=True)
-    INDEX.refresh()
-    print(f"  {len(INDEX.files)} files indexed in {time.time() - t0:.1f}s", flush=True)
+    INDEX.use_cache = not a.no_cache
+    cached = INDEX.load_cache()
+    progress = term.Progress("Indexing transcripts")
+    INDEX.refresh(on_progress=progress.update)
+    progress.clear()
+    total, parsed = len(INDEX.files), INDEX.parsed
+    if a.no_cache:
+        detail = "cache off"
+    elif cached:
+        detail = f"{parsed:,} updated, {total - parsed:,} from cache"
+    else:
+        detail = "first run, saved for next time"
+    print(f"  {term.green(term.OK)} Indexed {term.bold(f'{total:,}')} transcripts in "
+          f"{term.bold(f'{time.time() - t0:.1f}s')} {term.gray('(' + detail + ')')}", flush=True)
+    INDEX.save_cache(force=True)
+
     try:
         srv = Server(("127.0.0.1", a.port), Handler)
     except OSError:
-        print(f"Port {a.port} is in use. Is the dashboard already running? Try --port {a.port + 1}", file=sys.stderr)
+        print(f"  {term.red(term.FAIL)} Port {a.port} is in use. Is the dashboard already running? "
+              f"Try {term.bold(f'--port {a.port + 1}')}", file=sys.stderr)
         return 1
+
+    data = build_data()
+    STATUS.observe(data)
+    c = data["counts"]
+    print(f"  {term.green(term.OK)} {term.bold(str(len(data['accounts'])))} accounts {term.SEP} "
+          f"{term.bold(str(c['visible']))} sessions {term.SEP} {term.bold(str(c['projects']))} projects"
+          + (f" {term.SEP} {term.cyan(str(c['open']) + ' open now')}" if c.get("open") else "") + "\n", flush=True)
+    print_accounts(data)
+
     url = f"http://127.0.0.1:{a.port}"
-    print(f"Claude dashboard running at {url}  (Ctrl+C to stop)", flush=True)
+    print(f"\n  {term.bgreen(term.ARROW)} {term.bold('Dashboard')}  {term.cyan(url)}")
+    print(f"    {term.gray(f' {term.SEP} '.join(['Local only', 'read-only', 'Ctrl+C to stop', 'limit changes show up below']))}\n", flush=True)
     if not a.no_browser:
         threading.Timer(0.3, lambda: webbrowser.open(url)).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        INDEX.save_cache(force=True)
+        srv.server_close()
+    print(f"\n  {term.gray('Stopped.')}", flush=True)
     return 0
 
 
