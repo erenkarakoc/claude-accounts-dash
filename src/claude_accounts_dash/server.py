@@ -1,7 +1,7 @@
 """Claude Accounts Dashboard - local, read-only view of Claude desktop app data.
 
-Run:  claude-dash                  (opens http://127.0.0.1:8765)
-      claude-dash --port 9000 --no-browser
+Run:  claude-accounts-dash                  (opens http://127.0.0.1:8765)
+      claude-accounts-dash --port 9000 --no-browser
 
 Reads only local files:
   <Claude app data>/plan-usage-history.json     -> 5h / weekly limit % per account (org)
@@ -41,14 +41,14 @@ def _app_data_dir():
 
 def _config_dir():
     """Where this tool keeps its own settings (account nicknames)."""
-    if os.environ.get("CLAUDE_DASH_CONFIG_DIR"):
-        return Path(os.environ["CLAUDE_DASH_CONFIG_DIR"])
+    if os.environ.get("CLAUDE_ACCOUNTS_DASH_CONFIG_DIR"):
+        return Path(os.environ["CLAUDE_ACCOUNTS_DASH_CONFIG_DIR"])
     if sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", HOME / "AppData" / "Roaming")) / "claude-dash"
-    return Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "claude-dash"
+        return Path(os.environ.get("APPDATA", HOME / "AppData" / "Roaming")) / "claude-accounts-dash"
+    return Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config")) / "claude-accounts-dash"
 
 
-DESKTOP_DIR = Path(os.environ.get("CLAUDE_DASH_APP_DIR") or _app_data_dir())
+DESKTOP_DIR = Path(os.environ.get("CLAUDE_ACCOUNTS_DASH_APP_DIR") or _app_data_dir())
 USAGE_FILE = DESKTOP_DIR / "plan-usage-history.json"
 DESKTOP_SESSIONS = DESKTOP_DIR / "claude-code-sessions"
 CLAUDE_HOME = Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude")
@@ -694,7 +694,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
-            page = resources.files("claude_dash").joinpath("static/index.html").read_bytes()
+            page = resources.files("claude_accounts_dash").joinpath("static/index.html").read_bytes()
             return self._send(200, page, "text/html")
         if u.path == "/api/data":
             try:
@@ -748,7 +748,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="claude-dash", description="Local dashboard for your Claude accounts, limits and sessions.")
+    ap = argparse.ArgumentParser(prog="claude-accounts-dash", description="Local dashboard for your Claude accounts, limits and sessions.")
     ap.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
     ap.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
     ap.add_argument("--paths", action="store_true", help="print the local folders it reads and exit")

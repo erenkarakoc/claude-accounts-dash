@@ -1,8 +1,8 @@
-# claude-dash
+# claude-accounts-dash
 
-[![CI](https://github.com/erenkarakoc/claude-dash/actions/workflows/ci.yml/badge.svg)](https://github.com/erenkarakoc/claude-dash/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/claude-dash)](https://pypi.org/project/claude-dash/)
-[![Python](https://img.shields.io/pypi/pyversions/claude-dash)](https://pypi.org/project/claude-dash/)
+[![CI](https://github.com/erenkarakoc/claude-accounts-dash/actions/workflows/ci.yml/badge.svg)](https://github.com/erenkarakoc/claude-accounts-dash/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/claude-accounts-dash)](https://pypi.org/project/claude-accounts-dash/)
+[![Python](https://img.shields.io/pypi/pyversions/claude-accounts-dash)](https://pypi.org/project/claude-accounts-dash/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **A local dashboard for people who use more than one Claude account.**
@@ -37,27 +37,27 @@ a new session on another account and keep going.
 With [pipx](https://pipx.pypa.io/) (recommended: it installs the command in its own isolated environment):
 
 ```bash
-pipx install claude-dash
+pipx install claude-accounts-dash
 ```
 
 Or with pip:
 
 ```bash
-pip install claude-dash
+pip install claude-accounts-dash
 ```
 
 Install the latest version straight from GitHub:
 
 ```bash
-pipx install git+https://github.com/erenkarakoc/claude-dash.git
+pipx install git+https://github.com/erenkarakoc/claude-accounts-dash.git
 ```
 
-Upgrade later with `pipx upgrade claude-dash` or `pip install -U claude-dash`.
+Upgrade later with `pipx upgrade claude-accounts-dash` or `pip install -U claude-accounts-dash`.
 
 ## Usage
 
 ```bash
-claude-dash
+claude-accounts-dash
 ```
 
 The first start indexes your local transcripts, which takes a few seconds for hundreds of
@@ -72,7 +72,7 @@ every 30 seconds, and only re-reads files that changed. Stop it with `Ctrl+C`.
 | `--version` | Print the version |
 | `-h`, `--help` | Show help |
 
-`python -m claude_dash` does the same thing as `claude-dash`.
+`python -m claude_accounts_dash` does the same thing as `claude-accounts-dash`.
 
 ## What's in the dashboard
 
@@ -144,15 +144,15 @@ the account recorded in the transcript where possible.
 | Which account owns each desktop session | `<app data>/claude-code-sessions/<account>/<org>/local_*.json` |
 | Transcripts: messages, tokens, limit hits, compaction summaries | `~/.claude/projects/**/*.jsonl` |
 | Signed-in CLI account (email shown on its card) | `~/.claude.json` |
-| Your nicknames (written by claude-dash) | `<config>/nicknames.json` |
+| Your nicknames (written by claude-accounts-dash) | `<config>/nicknames.json` |
 
 | | `<app data>` | `<config>` |
 |---|---|---|
-| Windows | `%APPDATA%\Claude` | `%APPDATA%\claude-dash` |
-| macOS | `~/Library/Application Support/Claude` | `~/.config/claude-dash` |
-| Linux | `$XDG_CONFIG_HOME/Claude` (default `~/.config/Claude`) | `$XDG_CONFIG_HOME/claude-dash` |
+| Windows | `%APPDATA%\Claude` | `%APPDATA%\claude-accounts-dash` |
+| macOS | `~/Library/Application Support/Claude` | `~/.config/claude-accounts-dash` |
+| Linux | `$XDG_CONFIG_HOME/Claude` (default `~/.config/Claude`) | `$XDG_CONFIG_HOME/claude-accounts-dash` |
 
-claude-dash never modifies Claude's files. The only file it writes is `nicknames.json`.
+claude-accounts-dash never modifies Claude's files. The only file it writes is `nicknames.json`.
 
 **About the limit numbers:** the desktop app records usage only while it is signed in to that
 account, so an account you haven't opened for a while shows its last known value. When the
@@ -166,19 +166,19 @@ Environment variables, all optional:
 
 | Variable | Purpose |
 |---|---|
-| `CLAUDE_DASH_APP_DIR` | Use a different Claude desktop app data folder |
+| `CLAUDE_ACCOUNTS_DASH_APP_DIR` | Use a different Claude desktop app data folder |
 | `CLAUDE_CONFIG_DIR` | Use a different `.claude` folder (same variable Claude Code uses) |
-| `CLAUDE_DASH_CONFIG_DIR` | Where to store `nicknames.json` |
+| `CLAUDE_ACCOUNTS_DASH_CONFIG_DIR` | Where to store `nicknames.json` |
 
 ## Troubleshooting
 
 - **"Port 8765 is in use"**: the dashboard is probably already running in another terminal.
   Open `http://127.0.0.1:8765`, or start another one with `--port 8766`.
-- **No accounts or limits shown**: run `claude-dash --paths` to see which folders were found.
+- **No accounts or limits shown**: run `claude-accounts-dash --paths` to see which folders were found.
   Limits need the Claude desktop app. Sign in to each account in the app at least once.
 - **An account's numbers look old**: open the desktop app signed in to that account. It
   updates the usage history in the background.
-- **`claude-dash: command not found` after pipx install**: run `pipx ensurepath` and open a
+- **`claude-accounts-dash: command not found` after pipx install**: run `pipx ensurepath` and open a
   new terminal.
 - **Unicode shows incorrectly in exports**: exports are UTF-8. Open the downloaded `.md`
   in an editor that uses UTF-8.
@@ -186,12 +186,12 @@ Environment variables, all optional:
 ## Development
 
 ```bash
-git clone https://github.com/erenkarakoc/claude-dash.git
-cd claude-dash
+git clone https://github.com/erenkarakoc/claude-accounts-dash.git
+cd claude-accounts-dash
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -e .
-claude-dash
+claude-accounts-dash
 ```
 
 Run the tests (they use a fake data folder, not your real one):
@@ -203,7 +203,7 @@ python -m unittest discover -s tests -v
 Project layout:
 
 ```
-src/claude_dash/
+src/claude_accounts_dash/
   server.py          reads local files, builds the data, serves the page and API
   static/index.html  the dashboard (plain HTML/CSS/JS, no build step)
 tests/               smoke tests with fixture data
@@ -211,7 +211,7 @@ tests/               smoke tests with fixture data
 
 ### Releasing
 
-1. Bump `__version__` in `src/claude_dash/__init__.py`.
+1. Bump `__version__` in `src/claude_accounts_dash/__init__.py`.
 2. Create a GitHub release. The **Publish to PyPI** workflow builds and uploads it.
    One-time setup: on PyPI, add a [trusted publisher](https://docs.pypi.org/trusted-publishers/)
    for this repository with workflow `publish.yml` and environment `pypi`.

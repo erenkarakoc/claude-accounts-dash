@@ -73,11 +73,11 @@ def make_fixture(root: Path):
 class DashboardTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp = Path(tempfile.mkdtemp(prefix="claude-dash-test-"))
+        cls.tmp = Path(tempfile.mkdtemp(prefix="claude-accounts-dash-test-"))
         app, claude, cfg, cls.proj = make_fixture(cls.tmp)
-        cls._env = {k: os.environ.get(k) for k in ("CLAUDE_DASH_APP_DIR", "CLAUDE_CONFIG_DIR", "CLAUDE_DASH_CONFIG_DIR")}
-        os.environ.update(CLAUDE_DASH_APP_DIR=str(app), CLAUDE_CONFIG_DIR=str(claude), CLAUDE_DASH_CONFIG_DIR=str(cfg))
-        import claude_dash.server as server
+        cls._env = {k: os.environ.get(k) for k in ("CLAUDE_ACCOUNTS_DASH_APP_DIR", "CLAUDE_CONFIG_DIR", "CLAUDE_ACCOUNTS_DASH_CONFIG_DIR")}
+        os.environ.update(CLAUDE_ACCOUNTS_DASH_APP_DIR=str(app), CLAUDE_CONFIG_DIR=str(claude), CLAUDE_ACCOUNTS_DASH_CONFIG_DIR=str(cfg))
+        import claude_accounts_dash.server as server
         cls.S = importlib.reload(server)
 
     @classmethod
