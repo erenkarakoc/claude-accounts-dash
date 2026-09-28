@@ -503,7 +503,13 @@ async function openFolder(p) {
   const r = await fetch("/api/open", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({path: p})});
   toast(r.ok ? "Opened in Explorer" : "Folder not available");
 }
-function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), 2200); }
+function toast(t) {
+  const el = $("#toast"), dlg = $("#dlg");
+  // An open modal dialog sits in the browser's top layer, above any z-index, so the toast must live inside it.
+  const host = dlg.open ? dlg : document.body;
+  if (el.parentElement !== host) host.appendChild(el);
+  el.textContent = t; el.classList.add("on"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), 2200);
+}
 
 document.addEventListener("click", async e => {
   const x = e.target.closest("[data-export],[data-copy],[data-open]"); if (!x) return;
